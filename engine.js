@@ -24,7 +24,7 @@
 
   // ---------------- Torneio em andamento ----------------
 
-  function newTournament({ name, date, lives, players }) {
+  function newTournament({ name, date, lives, players, ranked = true }) {
     const seen = new Set();
     const participants = [];
     for (const p of players || []) {
@@ -38,6 +38,7 @@
       name: norm(name) || 'Torneio',
       date: date || new Date().toISOString().slice(0, 10),
       lives: Math.max(1, parseInt(lives, 10) || 3),
+      ranked: ranked !== false, // vale para o ranking da temporada?
       participants,
       rounds: [],
       status: 'running', // running | finished
@@ -164,6 +165,7 @@
       name: t.name,
       date: t.date,
       lives: t.lives,
+      ranked: t.ranked !== false,
       winner: t.winner,
       runnerUp: t.runnerUp,
       undefeated: !!t.undefeated,
@@ -193,6 +195,7 @@
       name: norm(r.name) || 'Torneio',
       date: r.date || '',
       lives: r.lives || null,
+      ranked: r.ranked !== false,
       winner: r.winner ? norm(r.winner) : null,
       runnerUp: r.runnerUp ? norm(r.runnerUp) : null,
       undefeated: !!r.undefeated,
@@ -279,6 +282,28 @@
     return { duels, a: duels.filter((d) => d.winner === a).length, b: duels.filter((d) => d.winner === b).length };
   }
 
+  // Confrontos diretos entre um grupo de jogadores (só duelos entre eles)
+  function groupH2H(records, names) {
+    const set = new Set(names);
+    const tot = new Map(names.map((n) => [n, { name: n, wins: 0, losses: 0 }]));
+    const pair = new Map(); // "a\u0000b" -> vitórias de a sobre b
+    const duels = [];
+    for (const t of records) {
+      (t.rounds || []).forEach((r, ri) => r.duels.forEach(([a, b], i) => {
+        const w = r.winners[i];
+        if (!w || !set.has(a) || !set.has(b)) return;
+        const l = w === a ? b : a;
+        tot.get(w).wins++; tot.get(l).losses++;
+        const k = w + '\u0000' + l; pair.set(k, (pair.get(k) || 0) + 1);
+        duels.push({ tournament: t.name, date: t.date, round: ri + 1, winner: w, loser: l, ranked: t.ranked !== false });
+      }));
+    }
+    const rows = [...tot.values()].map((x) => ({ ...x, games: x.wins + x.losses, winPct: x.wins + x.losses ? (x.wins / (x.wins + x.losses)) * 100 : 0 }))
+      .sort((x, y) => y.wins - x.wins || y.winPct - x.winPct || x.name.localeCompare(y.name));
+    duels.sort((x, y) => (y.date || '').localeCompare(x.date || '') || y.round - x.round);
+    return { rows, duels, vs: (a, b) => pair.get(a + '\u0000' + b) || 0 };
+  }
+
   function allPlayers(records, current) {
     const s = new Set();
     records.forEach((t) => (t.participants || []).forEach((n) => s.add(n)));
@@ -302,11 +327,24 @@
     return records;
   }
 
+  // Torneios antigos (sem o campo) contam como válidos para o ranking
+  const isRanked = (r) => !!r && r.ranked !== false;
+  const seasonOf = (r) => (r.date || '').slice(0, 4);
+  function seasons(records) {
+    return [...new Set(records.map(seasonOf).filter(Boolean))].sort().reverse();
+  }
+  function filterRecords(records, { type = 'all', season = 'all' } = {}) {
+    return records.filter((r) =>
+      (type === 'all' || (type === 'ranked' ? isRanked(r) : !isRanked(r))) &&
+      (season === 'all' || seasonOf(r) === season));
+  }
+
   const api = {
+    isRanked, seasonOf, seasons, filterRecords,
     uid, norm, key, shuffle,
     newTournament, alive, currentRound, roundOpen, drawRound, setWinner, canCloseRound, closeRound,
     withdraw, addLatePlayer, toRecord, normalizeRecord,
-    playerStats, ranking, hallOfFame, months, monthly, headToHead, allPlayers, renamePlayer,
+    playerStats, ranking, hallOfFame, months, monthly, headToHead, groupH2H, allPlayers, renamePlayer,
   };
   root.CTD_ENGINE = api;
   if (typeof module !== 'undefined') module.exports = api;

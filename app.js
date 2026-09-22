@@ -147,8 +147,9 @@
       <div class="tourn__head">
         <div><h3>${h(t.name)}</h3><div class="muted mono" style="font-size:12px">${fmtDate(t.date)} · ${plural(t.players, 'jogador', 'jogadores')}${t.lives ? ` · ${t.lives} vidas` : ''}</div></div>
         <div class="tourn__win">${t.winner ? pball(t.winner, 'sm') : ''}<div><b>🏆 ${h(t.winner || '—')}</b><small>vice ${h(t.runnerUp || '—')}</small></div></div>
-        <div class="btn-row">${t.undefeated ? '<span class="tag gold">CAMPEÃO INVICTO</span>' : '<span class="tag green">Finalizado</span>'}
-          ${admin ? `<button class="btn btn-sm btn-danger" data-del="${h(t.id)}" title="Excluir torneio">✕</button>` : ''}</div>
+        <div class="btn-row">${E.isRanked(t) ? '<span class="tag gold">🏆 RANKING</span>' : '<span class="tag">🤝 AMISTOSO</span>'}${t.undefeated ? '<span class="tag gold">INVICTO</span>' : ''}
+          ${admin ? `<button class="btn btn-sm" data-rank="${h(t.id)}" title="${E.isRanked(t) ? 'Marcar como amistoso (não vale ranking)' : 'Marcar como válido para o ranking'}">${E.isRanked(t) ? 'Tirar do ranking' : 'Pôr no ranking'}</button>
+          <button class="btn btn-sm btn-danger" data-del="${h(t.id)}" title="Excluir torneio">✕</button>` : ''}</div>
       </div>
       ${t.rounds && t.rounds.length ? `<details class="rounds" ${open ? 'open' : ''}><summary>Ver duelos sorteados (${t.rounds.length} rodadas)</summary>${roundsHtml(t.rounds)}</details>` : ''}
     </article>`;
@@ -210,7 +211,7 @@
   }
 
   // ---------- Sorteio / torneio ----------
-  const draft = { name: '', date: '', lives: C.defaultLives, players: [] };
+  const draft = { name: '', date: '', lives: C.defaultLives, players: [], ranked: true };
 
   function viewSorteio() {
     const cur = state.current;
@@ -238,6 +239,11 @@
           <div class="field"><label for="tDate">Data</label><input class="input" id="tDate" type="date" value="${h(draft.date)}"></div>
           <div class="field"><label for="tLives">Vidas</label><input class="input" id="tLives" type="number" min="1" max="9" value="${h(draft.lives)}"></div>
         </div>
+        <label class="switch" style="margin-top:16px">
+          <input type="checkbox" id="tRanked" ${draft.ranked ? 'checked' : ''}>
+          <span class="switch__ui" aria-hidden="true"></span>
+          <span><b>Vale para o Ranking da temporada</b><small class="muted">Desmarque para amistosos, treinos ou torneios de fora. Eles ficam no histórico, mas não contam pontos.</small></span>
+        </label>
         <div class="field" style="margin-top:14px"><label for="pName">Participantes (${draft.players.length})</label>
           <form class="add-row" id="addForm" autocomplete="off">
             <input class="input" id="pName" list="knownPlayers" placeholder="Digite um nome e aperte Enter (ou cole vários separados por vírgula)" maxlength="600">
@@ -259,8 +265,8 @@
   }
 
   function bindSetup() {
-    const sync = () => { draft.name = $('#tName').value; draft.date = $('#tDate').value; draft.lives = $('#tLives').value; };
-    ['#tName', '#tDate', '#tLives'].forEach((s) => $(s).addEventListener('input', sync));
+    const sync = () => { draft.name = $('#tName').value; draft.date = $('#tDate').value; draft.lives = $('#tLives').value; draft.ranked = $('#tRanked').checked; };
+    ['#tName', '#tDate', '#tLives', '#tRanked'].forEach((s) => $(s).addEventListener('input', sync));
     $('#tLives').addEventListener('change', () => render());
     const add = (name) => {
       const n = E.norm(name).slice(0, 40); if (!n) return;
@@ -282,12 +288,12 @@
       sync();
       if (!S.canWrite()) throw new Error('Entre como administrador.');
       if (!draft.name.trim()) { $('#tName').focus(); throw new Error('Dê um nome ao torneio.'); }
-      const t = E.newTournament({ name: draft.name, date: draft.date, lives: draft.lives, players: draft.players });
+      const t = E.newTournament({ name: draft.name, date: draft.date, lives: draft.lives, players: draft.players, ranked: draft.ranked });
       if (t.participants.length < 2) throw new Error('Adicione ao menos 2 jogadores.');
       E.drawRound(t);
       state.current = t; state.undo = [];
       await saveCurrent();
-      Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [] });
+      Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true });
       await drawAnimation(t);
       render();
     }));
@@ -326,7 +332,7 @@
         ${can ? `<button class="btn btn-primary" id="drawNext">🎱 Sortear rodada ${t.rounds.length + 1}</button>` : ''}</div>`;
     }
 
-    return `${head(finished ? 'Torneio finalizado' : 'Torneio em andamento', t.name, `${fmtDate(t.date)} · ${plural(t.participants.length, 'jogador', 'jogadores')} · ${t.lives} vidas`)}
+    return `${head(finished ? 'Torneio finalizado' : 'Torneio em andamento', t.name, `${fmtDate(t.date)} · ${plural(t.participants.length, 'jogador', 'jogadores')} · ${t.lives} vidas · ${E.isRanked(t) ? 'Vale para o ranking' : 'Amistoso (não vale ranking)'}`)}
       ${!can ? loginHint(true) : ''}
       <div class="t-layout">
         <div>${main}
@@ -339,6 +345,7 @@
               <ul class="plist">${out.map((p) => `<li class="out"><span>${h(p.name)}</span><span class="mono" style="font-size:11px">${p.withdrew ? 'saiu' : 'R' + p.eliminatedRound}</span></li>`).join('')}</ul>` : ''}
           </div>
           ${can ? `<div class="card" style="margin-top:14px;display:grid;gap:8px">
+            <button class="btn btn-sm" id="rankT" title="Alterar se este torneio conta para o ranking">${E.isRanked(t) ? '🏆 Vale ranking: SIM' : '🤝 Amistoso: não vale ranking'}</button>
             <button class="btn btn-sm" id="undoBtn" ${state.undo.length ? '' : 'disabled'}>↶ Desfazer última ação</button>
             ${!finished ? `<button class="btn btn-sm" id="lateBtn" ${open ? 'disabled title="Disponível entre rodadas"' : ''}>＋ Incluir jogador</button>
             <button class="btn btn-sm" id="wdBtn" ${open ? 'disabled title="Disponível entre rodadas"' : ''}>⇥ Desistência</button>
@@ -359,6 +366,11 @@
     on('#drawNext', async () => { await mutate((x) => E.drawRound(x)); await drawAnimation(state.current); render(); });
     on('#redrawBtn', async () => { await mutate((x) => { x.rounds.pop(); E.drawRound(x); }); await drawAnimation(state.current); render(); });
     on('#undoBtn', undo);
+    on('#rankT', async () => {
+      await mutate((x) => { x.ranked = !E.isRanked(x); });
+      if (state.current.status === 'finished') { const rec = E.toRecord(state.current); await S.saveTournament(rec); state.records = state.records.filter((r) => r.id !== rec.id).concat(rec); }
+      toast(E.isRanked(state.current) ? 'Torneio vale para o ranking' : 'Torneio marcado como amistoso'); render();
+    });
     on('#newT', async () => { state.current = null; state.undo = []; await saveCurrent(); render(); });
     on('#cancelT', async () => {
       if (t.status !== 'finished' && !(await ask('Cancelar este torneio? Ele NÃO será salvo no histórico.', 'Cancelar torneio'))) return;
@@ -406,28 +418,69 @@
       <p class="muted">Vice: ${h(t.runnerUp || '—')}</p><button class="btn btn-primary" onclick="document.getElementById('overlay').click()">Fechar</button></div>`);
   }
 
+  // ---------- Filtro: válidos para o ranking x demais ----------
+  const curYear = String(new Date().getFullYear());
+  const flt = {
+    ranking: { type: 'ranked', season: null },
+    historico: { type: 'all', season: 'all' },
+    hall: { type: 'all', season: 'all' },
+    mes: { type: 'all', season: 'all' },
+    '1x1': { type: 'all', season: 'all' },
+  };
+  try { const saved = JSON.parse(localStorage.getItem('ctd.filters') || '{}'); for (const k in saved) if (flt[k]) Object.assign(flt[k], saved[k]); } catch {}
+  function recsFor(page) {
+    const f = flt[page];
+    const ss = E.seasons(state.records);
+    if (f.season === null) f.season = ss.includes(curYear) ? curYear : (ss[0] || 'all'); // padrão: temporada atual
+    if (f.season !== 'all' && !ss.includes(f.season)) f.season = 'all';
+    return E.filterRecords(state.records, f);
+  }
+  function filterBar(page, { season = true } = {}) {
+    const f = flt[page];
+    const base = E.filterRecords(state.records, { type: 'all', season: f.season || 'all' });
+    const n = { ranked: base.filter(E.isRanked).length, friendly: base.filter((r) => !E.isRanked(r)).length, all: base.length };
+    const btn = (k, label) => `<button class="seg__btn ${f.type === k ? 'on' : ''}" data-ft="${k}" aria-pressed="${f.type === k}">${label} <span>${n[k]}</span></button>`;
+    const ss = E.seasons(state.records);
+    return `<div class="filterbar">
+      <div class="seg" role="group" aria-label="Tipo de torneio">${btn('ranked', '🏆 Válidos p/ ranking')}${btn('friendly', '🤝 Amistosos')}${btn('all', 'Todos')}</div>
+      ${season ? `<label class="season"><span>Temporada</span><select class="input" id="fseason"><option value="all" ${f.season === 'all' ? 'selected' : ''}>Todas</option>${ss.map((y) => `<option value="${y}" ${f.season === y ? 'selected' : ''}>${y}</option>`).join('')}</select></label>` : ''}
+    </div>`;
+  }
+  function bindFilter(page) {
+    const save = () => { try { localStorage.setItem('ctd.filters', JSON.stringify(flt)); } catch {} };
+    $$('[data-ft]').forEach((b) => b.addEventListener('click', () => { flt[page].type = b.dataset.ft; save(); render(); }));
+    const se = $('#fseason'); if (se) se.addEventListener('change', () => { flt[page].season = se.value; save(); render(); });
+  }
+  const filterLabel = (page) => {
+    const f = flt[page];
+    return `${f.type === 'ranked' ? 'Só torneios válidos para o ranking' : f.type === 'friendly' ? 'Só amistosos' : 'Todos os torneios'}${f.season && f.season !== 'all' ? ` · temporada ${f.season}` : ''}`;
+  };
+
   // ---------- Ranking ----------
   const rankSort = { key: 'points', dir: -1 };
   function viewRanking() {
     const sc = C.scoring.ranking;
-    let rows = E.ranking(state.records, sc);
+    const recs = recsFor('ranking');
+    let rows = E.ranking(recs, sc);
     const pos = new Map(rows.map((r, i) => [r.name, i + 1]));
     const k = rankSort.key;
     if (k !== 'points') rows = rows.slice().sort((a, b) => (typeof a[k] === 'string' ? a[k].localeCompare(b[k]) : a[k] - b[k]) * rankSort.dir || a.name.localeCompare(b.name));
     else if (rankSort.dir === 1) rows = rows.slice().reverse();
     const cols = [['pos', '#'], ['name', 'Nome'], ['titles', '🏆 Títulos'], ['vices', '🥈 Vices'], ['undefeated', '⭐ Invictos'], ['participations', '🎱 Torneios'], ['wins', '✅ Vitórias'], ['losses', '❌ Derrotas'], ['winPct', '📊 % Vitória'], ['points', '🏅 Pontos']];
 
-    return `${head('Ranking', 'Estatísticas dos Jogadores', 'Desempenho completo em duelos e torneios')}
+    return `${head('Ranking', flt.ranking.type === 'ranked' && flt.ranking.season !== 'all' ? `Ranking da Temporada ${flt.ranking.season}` : 'Estatísticas dos Jogadores', `${filterLabel('ranking')} · ${plural(recs.length, 'torneio', 'torneios')}`)}
+      ${filterBar('ranking')}
       ${rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(([c, l]) => `<th data-sort="${c}" class="${c === 'name' ? 'name' : ''} ${rankSort.key === c ? 'sorted' : ''}">${l}${rankSort.key === c ? (rankSort.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('')}</tr></thead>
         <tbody>${rows.map((s) => { const p = pos.get(s.name); return `<tr class="rank-${p}"><td>${p <= 3 ? ball(p, 'xs') : p}</td><td class="name"><a class="who" href="#/1x1?a=${encodeURIComponent(s.name)}">${pball(s.name, 'sm')}${h(s.name)}</a></td><td>${s.titles}</td><td>${s.vices}</td><td>${s.undefeated}</td><td>${s.participations}</td><td>${s.wins}</td><td>${s.losses}</td>
           <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(s.winPct)}<div class="bar"><i style="width:${s.winPct}%"></i></div></div></td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`; }).join('')}</tbody></table></div>`
-        : '<div class="empty">Nenhum jogador registrado ainda. Finalize um torneio para aparecer aqui.</div>'}
+        : '<div class="empty">Nenhum torneio neste filtro. Troque o filtro acima ou finalize um torneio.</div>'}
       <section class="section card"><h2 class="section-title">Como os pontos são calculados</h2>
         <div class="legend">🏆 Título = <b>${sc.title}</b> pts · ⭐ Título invicto = <b>+${sc.undefeated}</b> · 🥈 Vice = <b>${sc.vice}</b> · ✅ Vitória em duelo = <b>${sc.win}</b> ·
         📊 Aproveitamento = <b>${sc.winPct}</b> pt por % · 🎱 Frequência = log₂(torneios + 1) × <b>${sc.participation}</b><br>
         <span class="muted">Clique no cabeçalho para ordenar. Valores ajustáveis em <code>config.js</code>.</span></div></section>`;
   }
   function bindRanking() {
+    bindFilter('ranking');
     $$('th[data-sort]').forEach((th) => th.addEventListener('click', () => {
       let k = th.dataset.sort; if (k === 'pos') k = 'points';
       rankSort.dir = rankSort.key === k ? -rankSort.dir : (k === 'name' || k === 'losses' ? 1 : -1);
@@ -436,14 +489,15 @@
   }
 
   // ---------- 1x1 ----------
-  function viewH2H(params) {
+  function viewPair(params) {
     const players = E.allPlayers(state.records);
     const a = params.get('a') || '', b = params.get('b') || '';
     const opt = (sel) => `<option value="">— escolher —</option>${players.map((n) => `<option ${n === sel ? 'selected' : ''}>${h(n)}</option>`).join('')}`;
     let body = '';
     if (a && b && a !== b) {
-      const r = E.headToHead(state.records, a, b);
-      const st = new Map(E.playerStats(state.records).map((s) => [s.name, s]));
+      const recs = recsFor('1x1');
+      const r = E.headToHead(recs, a, b);
+      const st = new Map(E.playerStats(recs).map((s) => [s.name, s]));
       const sa = st.get(a) || {}, sb = st.get(b) || {};
       const row = (label, k, fmt = (x) => x ?? 0, higher = true) => {
         const x = sa[k] ?? 0, y = sb[k] ?? 0;
@@ -466,13 +520,71 @@
               : '<div class="empty">Esses dois ainda não se enfrentaram.</div>'}</div>
         </div>`;
     } else if (a && a === b) body = '<div class="empty" style="margin-top:18px">Escolha dois jogadores diferentes.</div>';
-    return `${head('Estatísticas', 'Confronto 1×1', 'Compare dois jogadores e veja o histórico de duelos diretos')}
+    return `${modeTabs('par')}
       <div class="card"><div class="vs-pick">
         <div class="field"><label>Jogador A</label><select class="input" id="pa">${opt(a)}</select></div>
         <div class="big">VS</div>
         <div class="field"><label>Jogador B</label><select class="input" id="pb">${opt(b)}</select></div></div></div>${body}`;
   }
+  function modeTabs(mode) {
+    return `<div class="seg" role="tablist" style="margin-bottom:16px">
+      <a class="seg__btn ${mode === 'par' ? 'on' : ''}" href="#/1x1" role="tab" aria-selected="${mode === 'par'}">1 × 1</a>
+      <a class="seg__btn ${mode === 'grupo' ? 'on' : ''}" href="#/1x1?modo=grupo" role="tab" aria-selected="${mode === 'grupo'}">Grupo de jogadores</a></div>`;
+  }
+
+  function viewGroup(params) {
+    const players = E.allPlayers(state.records);
+    const sel = (params.get('g') || '').split('|').filter((n) => players.includes(n));
+    const chips = players.map((n) => `<button class="chip ${sel.includes(n) ? 'chip-on' : 'chip-add'}" data-g="${h(n)}" aria-pressed="${sel.includes(n)}">${sel.includes(n) ? '✓ ' : '＋ '}${h(n)}</button>`).join('');
+    let out = '';
+    if (sel.length >= 2) {
+      const g = E.groupH2H(recsFor('1x1'), sel);
+      const order = g.rows.map((r) => r.name);
+      out = `
+        <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:16px;align-items:start">
+          <div class="card"><h3 class="section-title" style="font-size:18px">Consolidado entre eles</h3>
+            <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Jogador</th><th>Duelos</th><th>✅ V</th><th>❌ D</th><th>📊 %</th></tr></thead>
+            <tbody>${g.rows.map((r, i) => `<tr class="rank-${i + 1}"><td>${i < 3 && r.games ? ball(i + 1, 'xs') : i + 1}</td><td class="name"><span class="who">${pball(r.name, 'sm')}${h(r.name)}</span></td><td>${r.games}</td><td>${r.wins}</td><td>${r.losses}</td>
+              <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(r.winPct)}<div class="bar"><i style="width:${r.winPct}%"></i></div></div></td></tr>`).join('')}</tbody></table></div>
+            <p class="legend">Conta apenas os duelos em que os dois lados estão no grupo selecionado.</p></div>
+          <div class="card"><h3 class="section-title" style="font-size:18px">Cruzamento (linha venceu × coluna)</h3>
+            <div class="table-wrap"><table class="matrix"><thead><tr><th class="name">Vitórias de ↓ sobre →</th>${order.map((n) => `<th title="${h(n)}">${pball(n, 'xs')}</th>`).join('')}</tr></thead>
+            <tbody>${order.map((a) => `<tr><td class="name"><span class="who">${pball(a, 'xs')}${h(a)}</span></td>${order.map((b) => {
+              if (a === b) return '<td class="mx-self">—</td>';
+              const w = g.vs(a, b), l = g.vs(b, a);
+              const cls = w + l === 0 ? 'mx-none' : w > l ? 'mx-win' : w < l ? 'mx-lose' : 'mx-tie';
+              return `<td class="${cls}" title="${h(a)} ${w} × ${l} ${h(b)}"><a href="#/1x1?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}">${w + l ? `${w}–${l}` : '·'}</a></td>`;
+            }).join('')}</tr>`).join('')}</tbody></table></div>
+            <p class="legend">Verde = leva vantagem · vermelho = em desvantagem · clique numa célula para ver o 1×1.</p></div>
+        </div>
+        <div class="card" style="margin-top:16px"><h3 class="section-title" style="font-size:18px">Duelos entre os selecionados <span class="muted mono" style="font-size:14px">${plural(g.duels.length, 'duelo', 'duelos')}</span></h3>
+          ${g.duels.length ? `<ul class="plist">${g.duels.slice(0, 60).map((d) => `<li><span><b style="color:#7fe0b0">✓ ${h(d.winner)}</b> <span class="muted">venceu</span> ${h(d.loser)}<br><small class="muted">${h(d.tournament)} · R${d.round} · ${d.ranked ? 'ranking' : 'amistoso'}</small></span><span class="muted mono" style="font-size:13px">${fmtDate(d.date)}</span></li>`).join('')}</ul>
+            ${g.duels.length > 60 ? '<p class="legend">Mostrando os 60 mais recentes.</p>' : ''}` : '<div class="empty">Esses jogadores ainda não se enfrentaram neste filtro.</div>'}
+        </div>`;
+    } else out = '<div class="empty" style="margin-top:16px">Selecione pelo menos 2 jogadores acima.</div>';
+    return `${modeTabs('grupo')}
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <h3 style="margin:0;font-family:var(--display);text-transform:uppercase;font-weight:600">Escolha os jogadores (${sel.length})</h3>
+        <span class="btn-row">${sel.length ? '<button class="btn btn-sm" id="gClear">Limpar</button>' : ''}<button class="btn btn-sm" id="gTop">Top 5 do ranking</button></span></div>
+        <div class="chips">${chips || '<span class="muted">Nenhum jogador ainda.</span>'}</div></div>${out}`;
+  }
+
+  function viewH2H(params) {
+    const grupo = params.get('modo') === 'grupo';
+    return `${head('Estatísticas', grupo ? 'Confrontos do Grupo' : 'Confronto 1×1', grupo ? 'Selecione vários jogadores e veja o consolidado só das partidas entre eles' : 'Compare dois jogadores e veja o histórico de duelos diretos')}
+      ${filterBar('1x1')}
+      ${grupo ? viewGroup(params) : viewPair(params)}`;
+  }
   function bindH2H() {
+    bindFilter('1x1');
+    if (parseHash().params.get('modo') === 'grupo') {
+      const cur = (parseHash().params.get('g') || '').split('|').filter(Boolean);
+      const setG = (list) => { const q = new URLSearchParams({ modo: 'grupo' }); if (list.length) q.set('g', list.join('|')); location.hash = '#/1x1?' + q; };
+      $$('[data-g]').forEach((b) => b.addEventListener('click', () => { const n = b.dataset.g; setG(cur.includes(n) ? cur.filter((x) => x !== n) : cur.concat(n)); }));
+      const c = $('#gClear'); if (c) c.addEventListener('click', () => setG([]));
+      $('#gTop').addEventListener('click', () => setG(E.ranking(recsFor('1x1'), C.scoring.ranking).slice(0, 5).map((r) => r.name)));
+      return;
+    }
     const go = () => { const q = new URLSearchParams(); if ($('#pa').value) q.set('a', $('#pa').value); if ($('#pb').value) q.set('b', $('#pb').value); location.hash = '#/1x1?' + q; };
     $('#pa').addEventListener('change', go); $('#pb').addEventListener('change', go);
   }
@@ -481,12 +593,21 @@
   let histFilter = '';
   function viewHistory() {
     const admin = S.canWrite();
-    const recs = sortedRecords().filter((t) => !histFilter || E.key(JSON.stringify([t.name, t.participants])).includes(E.key(histFilter)));
+    const recs = recsFor('historico').slice().sort((x, y) => (y.date || '').localeCompare(x.date || '')).filter((t) => !histFilter || E.key(JSON.stringify([t.name, t.participants])).includes(E.key(histFilter)));
     return `${head('Histórico', 'Torneios Anteriores', `${plural(state.records.length, 'torneio disputado', 'torneios disputados')}`)}
+      ${filterBar('historico')}
       <input class="input" id="hf" placeholder="Filtrar por nome do torneio ou jogador…" value="${h(histFilter)}" style="margin-bottom:14px">
       <div id="hl">${recs.length ? recs.map((t) => tournamentCard(t, { admin })).join('') : '<div class="empty">Nenhum torneio encontrado.</div>'}</div>`;
   }
   function bindHistory() {
+    bindFilter('historico');
+    $$('[data-rank]').forEach((b) => b.addEventListener('click', () => guard(async () => {
+      const t = state.records.find((r) => r.id === b.dataset.rank);
+      const rec = { ...t, ranked: !E.isRanked(t) };
+      await S.saveTournament(rec);
+      state.records = state.records.map((r) => (r.id === rec.id ? rec : r));
+      toast(rec.ranked ? `"${rec.name}" agora vale para o ranking` : `"${rec.name}" marcado como amistoso`); render();
+    })));
     const f = $('#hf');
     f.addEventListener('input', () => { histFilter = f.value; const pos = f.selectionStart; render(); const g = $('#hf'); g.focus(); g.setSelectionRange(pos, pos); });
     $$('[data-del]').forEach((b) => b.addEventListener('click', () => guard(async () => {
@@ -498,8 +619,9 @@
 
   // ---------- Hall da Fama ----------
   function viewHall() {
-    const hall = E.hallOfFame(state.records);
-    return `${head('Hall da Fama', 'Ranking de Campeões', 'Todos que já levantaram a taça ou bateram na trave')}
+    const hall = E.hallOfFame(recsFor('hall'));
+    return `${head('Hall da Fama', 'Ranking de Campeões', filterLabel('hall'))}
+      ${filterBar('hall')}
       ${hall.length ? `<div class="podium">${hall.slice(0, 3).map(champCard).join('')}</div>
         ${hall.length > 3 ? `<div class="grid grid-auto" style="margin-top:14px">${hall.slice(3).map((s, i) => champCard(s, i + 3)).join('')}</div>` : ''}`
         : '<div class="empty">Nenhum campeão ainda.</div>'}`;
@@ -508,10 +630,11 @@
   // ---------- Melhores do mês ----------
   let monthSel = '';
   function viewMonth() {
-    const ms = E.months(state.records);
+    const mrecs = recsFor('mes');
+    const ms = E.months(mrecs);
     if (!ms.includes(monthSel)) monthSel = ms[0] || '';
     const sc = C.scoring.monthly;
-    const { tournaments, rows } = monthSel ? E.monthly(state.records, monthSel, sc) : { tournaments: 0, rows: [] };
+    const { tournaments, rows } = monthSel ? E.monthly(mrecs, monthSel, sc) : { tournaments: 0, rows: [] };
     const top = (k, min = 0) => rows.filter((r) => r[k] > min).slice().sort((a, b) => b[k] - a[k] || b.points - a.points)[0];
     const eligible = rows.filter((r) => r.games >= 5);
     const best = eligible.slice().sort((a, b) => b.winPct - a.winPct || b.games - a.games)[0];
@@ -523,7 +646,8 @@
       ['🎱', 'Mais presente', top('participations'), (r) => plural(r.participations, 'torneio', 'torneios')],
       ['🥈', 'Mais vices', top('vices'), (r) => plural(r.vices, 'vice', 'vices')],
     ];
-    return `${head('Power Ranking', 'Melhores do Mês', 'Destaques e estatísticas por período')}
+    return `${head('Power Ranking', 'Melhores do Mês', filterLabel('mes'))}
+      ${filterBar('mes', { season: false })}
       ${ms.length ? `<div style="display:flex;gap:10px;align-items:center;justify-content:center;margin-bottom:22px;flex-wrap:wrap">
           <select class="input" id="ms" style="max-width:240px">${ms.map((m) => `<option value="${m}" ${m === monthSel ? 'selected' : ''}>${fmtMonth(m)}</option>`).join('')}</select>
           <span class="muted">${plural(tournaments, 'torneio', 'torneios')}</span></div>
@@ -532,9 +656,10 @@
           <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Nome</th><th>🏆</th><th>⭐</th><th>🥈</th><th>✅ V</th><th>❌ D</th><th>📊 %</th><th>🎱</th><th>Pts</th></tr></thead>
           <tbody>${rows.map((s, i) => `<tr class="rank-${i + 1}"><td>${i < 3 ? ball(i + 1, 'xs') : i + 1}</td><td class="name"><span class="who">${pball(s.name, 'sm')}${h(s.name)}</span></td><td>${s.titles}</td><td>${s.undefeated}</td><td>${s.vices}</td><td>${s.wins}</td><td>${s.losses}</td><td>${pct(s.winPct)}</td><td>${s.participations}</td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`).join('')}</tbody></table></div>
           <p class="legend">Pontuação: 🏆 Título = ${sc.title} · ⭐ Invicto = +${sc.undefeated} · 🥈 Vice = ${sc.vice} · ✅ Vitória em duelo = ${sc.win} · 🎱 Participação = ${sc.participation}. “Melhor aproveitamento” exige ao menos 5 duelos no mês.</p></section>`
-        : '<div class="empty">Nenhum dado disponível ainda.</div>'}`;
+        : '<div class="empty">Nenhum torneio neste filtro.</div>'}`;
   }
-  function bindMonth() { const s = $('#ms'); if (s) s.addEventListener('change', () => { monthSel = s.value; render(); }); }
+  function bindMonth() {
+    bindFilter('mes'); const s = $('#ms'); if (s) s.addEventListener('change', () => { monthSel = s.value; render(); }); }
 
   // ---------- Configurações / backup ----------
   function loginHint(live) {
@@ -606,7 +731,7 @@
     ranking: [viewRanking, bindRanking],
     '1x1': [viewH2H, bindH2H],
     historico: [viewHistory, bindHistory],
-    hall: [viewHall],
+    hall: [viewHall, () => bindFilter('hall')],
     mes: [viewMonth, bindMonth],
     config: [viewConfig, bindConfig],
   };

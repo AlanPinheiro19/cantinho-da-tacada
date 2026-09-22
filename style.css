@@ -321,3 +321,39 @@ code { font-size: .92em; background: rgba(0,0,0,.3); padding: 1px 5px; border-ra
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- Filtro ranking x amistosos ---------- */
+.filterbar { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; justify-content: space-between; margin: 0 0 20px; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.seg__btn { background: transparent; border: 0; border-right: 1px solid var(--line-2); padding: 10px 14px; cursor: pointer; color: var(--muted);
+  font-family: var(--cond); font-weight: 700; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; }
+.seg__btn:last-child { border-right: 0; }
+.seg__btn span { display: inline-block; min-width: 22px; margin-left: 4px; padding: 0 6px; border-radius: 99px; background: rgba(255,255,255,.08); font-size: 13px; color: var(--text); }
+.seg__btn:hover { color: var(--text); }
+.seg__btn.on { background: linear-gradient(180deg, var(--brass-lit), var(--brass)); color: var(--brass-ink); }
+.seg__btn.on span { background: rgba(0,0,0,.18); color: var(--brass-ink); }
+.season { display: inline-flex; align-items: center; gap: 10px; font-family: var(--cond); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; font-size: 13px; color: var(--muted); }
+.season .input { width: auto; min-width: 120px; padding: 9px 12px; }
+@media (max-width: 520px) { .seg { width: 100%; } .seg__btn { flex: 1; padding: 10px 8px; font-size: 13.5px; } }
+
+/* chave liga/desliga */
+.switch { display: flex; gap: 14px; align-items: flex-start; cursor: pointer; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #0b1b15; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch__ui { flex: none; width: 46px; height: 26px; border-radius: 99px; background: rgba(255,255,255,.14); position: relative; transition: background .15s; margin-top: 2px; }
+.switch__ui::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fbf8f1; box-shadow: 0 1px 3px rgba(0,0,0,.5); transition: transform .15s; }
+.switch input:checked + .switch__ui { background: var(--felt-lit); }
+.switch input:checked + .switch__ui::after { transform: translateX(20px); }
+.switch input:focus-visible + .switch__ui { outline: 2px solid var(--brass-lit); outline-offset: 2px; }
+.switch small { display: block; font-size: 13px; margin-top: 2px; }
+
+/* ---------- Confrontos do grupo ---------- */
+a.seg__btn { display: inline-flex; align-items: center; text-decoration: none; }
+.chip-on { cursor: pointer; padding: 6px 14px; background: linear-gradient(180deg, var(--brass-lit), var(--brass)); border-color: var(--brass); color: var(--brass-ink); font-weight: 600; }
+.matrix th, .matrix td { padding: 8px; }
+.matrix td a { color: inherit; display: block; font-family: var(--cond); font-weight: 700; font-size: 16px; }
+.matrix td a:hover { text-decoration: none; }
+.mx-self { color: var(--muted); background: rgba(255,255,255,.03); }
+.mx-none { color: var(--muted); }
+.mx-win { background: rgba(31,154,106,.28); color: #bff3d8; }
+.mx-lose { background: rgba(226,88,78,.2); color: #ffc9c4; }
+.mx-tie { background: rgba(216,170,79,.16); color: var(--brass-lit); }
