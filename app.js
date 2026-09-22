@@ -47,13 +47,31 @@
     try { await fn(); } catch (e) { console.error(e); toast(e.message || String(e), true); }
   }
 
+  // Banner fotográfico no topo de cada página
+  const ROUTE_IMG = { sorteio: 'sorteio', ranking: 'ranking', '1x1': 'duel', historico: 'history', hall: 'hall', mes: 'month', config: 'config' };
+  const img = (k) => (C.images && (C.images[k] || C.images.hero)) || '';
   function head(eyebrow, title, sub) {
-    return `<div class="eyebrow">${h(eyebrow)}</div><h1 class="page-title">${h(title)}</h1>${sub ? `<p class="page-sub">${h(sub)}</p>` : ''}`;
+    const src = img(ROUTE_IMG[parseHash().path] || 'hero');
+    return `<section class="banner" style="--img:url('${h(src)}')"><div class="banner__in">
+      <div class="eyebrow">${h(eyebrow)}</div><h1 class="page-title">${h(title)}</h1>${sub ? `<p class="page-sub">${h(sub)}</p>` : ''}
+    </div></section>`;
+  }
+
+  // Bola de sinuca numerada (1–15): posições e destaques
+  function ball(n, size = '') {
+    const k = ((n - 1) % 15) + 1;
+    return `<span class="ball b${k} ${size}" aria-label="${n}º"><i>${n}</i></span>`;
+  }
+  // "Bola" do jogador: cor fixa pelo nome + iniciais
+  function pball(name, size = '') {
+    let x = 0; for (const c of String(name)) x = (x * 31 + c.charCodeAt(0)) >>> 0;
+    const ini = String(name).trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    return `<span class="ball pb b${(x % 15) + 1} ${size}" aria-hidden="true"><i>${h(ini)}</i></span>`;
   }
 
   function livesHtml(p, lives) {
     const left = Math.max(0, lives - p.losses);
-    return `<span class="lives" title="${left} de ${lives} vidas">${'●'.repeat(left)}<span class="lost">${'●'.repeat(lives - left)}</span></span>`;
+    return `<span class="lives" title="${left} de ${lives} vidas" aria-label="${left} de ${lives} vidas">${'<i class="on"></i>'.repeat(left)}${'<i></i>'.repeat(lives - left)}</span>`;
   }
 
   function duelMini(d, w) {
@@ -117,8 +135,7 @@
   function champCard(s, i) {
     const cls = i < 3 ? `p${i + 1}` : '';
     return `<article class="card champ ${cls}">
-      ${i === 0 ? '<span class="crown">👑</span>' : ''}
-      <span class="pos">#${i + 1}</span>
+      ${ball(i + 1, i < 3 ? 'lg' : '')}
       <h3>${h(s.name)}</h3>
       <div class="titles">${plural(s.titles, 'título', 'títulos')}</div>
       <div class="meta"><span class="tag gold">★ ${plural(s.undefeated, 'invicto', 'invictos')}</span><span class="tag">🥈 ${plural(s.vices, 'vice', 'vices')}</span></div>
@@ -129,7 +146,7 @@
     return `<article class="card tourn" data-id="${h(t.id)}">
       <div class="tourn__head">
         <div><h3>${h(t.name)}</h3><div class="muted mono" style="font-size:12px">${fmtDate(t.date)} · ${plural(t.players, 'jogador', 'jogadores')}${t.lives ? ` · ${t.lives} vidas` : ''}</div></div>
-        <div class="tourn__win">🏆 <b>${h(t.winner || '—')}</b><small>vice ${h(t.runnerUp || '—')}</small></div>
+        <div class="tourn__win">${t.winner ? pball(t.winner, 'sm') : ''}<div><b>🏆 ${h(t.winner || '—')}</b><small>vice ${h(t.runnerUp || '—')}</small></div></div>
         <div class="btn-row">${t.undefeated ? '<span class="tag gold">CAMPEÃO INVICTO</span>' : '<span class="tag green">Finalizado</span>'}
           ${admin ? `<button class="btn btn-sm btn-danger" data-del="${h(t.id)}" title="Excluir torneio">✕</button>` : ''}</div>
       </div>
@@ -145,28 +162,40 @@
     const duels = players.reduce((a, s) => a + s.wins, 0);
     const cur = state.current;
 
+    const live = cur && cur.status === 'running';
+    const top = hall[0];
     return `
-      <section class="hero">
-        <div class="eyebrow">Clube de sinuca</div>
-        <h1>${h(C.clubName).replace(/(\S+)$/, '<span>$1</span>')}</h1>
-        <p>${h(C.tagline)} — sorteio de duelos, placar ao vivo, ranking e histórico de todos os torneios.</p>
-        <div class="btn-row" style="justify-content:center"><a class="btn btn-primary" href="#/sorteio">🎱 ${cur && cur.status === 'running' ? 'Ver torneio ao vivo' : 'Novo torneio'}</a><a class="btn" href="#/ranking">Ver ranking</a></div>
+      <section class="hero" style="--img:url('${h(img('hero'))}')">
+        <div class="hero__in">
+          <div class="hero__copy">
+            <div class="eyebrow">Clube de sinuca · desde a primeira tacada</div>
+            <h1>${h(C.clubName)}</h1>
+            <p>${h(C.tagline)}. Sorteio de duelos, placar ao vivo, ranking e o histórico de cada torneio da casa.</p>
+            <div class="btn-row"><a class="btn btn-primary btn-lg" href="#/sorteio">${live ? 'Acompanhar ao vivo' : 'Montar torneio'}</a><a class="btn btn-ghost btn-lg" href="#/ranking">Ver ranking</a></div>
+          </div>
+          <aside class="hero__card">
+            ${live ? `<div class="live-tag"><span class="pulse"></span>AO VIVO · RODADA ${cur.rounds.length || 1}</div>
+              <h2>${h(cur.name)}</h2>
+              <p>${plural(E.alive(cur).length, 'jogador ainda na mesa', 'jogadores ainda na mesa')}</p>
+              <div class="hero__balls">${E.alive(cur).slice(0, 8).map((p) => `<span title="${h(p.name)}">${pball(p.name)}</span>`).join('')}</div>
+              <a class="btn btn-primary btn-block" href="#/sorteio">Ver os duelos</a>`
+            : top ? `<div class="live-tag gold">Maior campeão</div>
+              <div class="hero__champ">${pball(top.name, 'lg')}<div><h2>${h(top.name)}</h2><p>${plural(top.titles, 'título', 'títulos')} · ${plural(top.vices, 'vice', 'vices')}</p></div></div>
+              <a class="btn btn-ghost btn-block" href="#/hall">Hall da Fama</a>`
+            : `<div class="live-tag">Primeira partida</div><h2>A mesa está livre</h2><p>Cadastre os jogadores e sorteie os primeiros duelos.</p><a class="btn btn-primary btn-block" href="#/sorteio">Começar</a>`}
+          </aside>
+        </div>
       </section>
 
-      ${cur && cur.status === 'running' ? `
-      <section class="section"><div class="card live-banner">
-        <div><div class="mono" style="font-size:12px"><span class="pulse"></span>AO VIVO · RODADA ${cur.rounds.length || 1}</div>
-        <h2 style="margin:6px 0 2px">${h(cur.name)}</h2><div class="muted">${plural(E.alive(cur).length, 'jogador ainda na disputa', 'jogadores ainda na disputa')}</div></div>
-        <a class="btn btn-primary" href="#/sorteio">Acompanhar ▸</a></div></section>` : ''}
-
-      <section class="section grid grid-3">
-        <div class="card stat"><b>${recs.length}</b><span>torneios</span></div>
-        <div class="card stat"><b>${players.length}</b><span>jogadores</span></div>
-        <div class="card stat"><b>${duels}</b><span>duelos disputados</span></div>
+      <section class="statband">
+        <div><b>${recs.length}</b><span>torneios</span></div>
+        <div><b>${players.length}</b><span>jogadores</span></div>
+        <div><b>${duels}</b><span>duelos disputados</span></div>
+        <div><b>${recs.filter((t) => t.undefeated).length}</b><span>títulos invictos</span></div>
       </section>
 
       <section class="section">
-        <div class="eyebrow">Hall da Fama</div><h2 class="page-title" style="font-size:28px">Maiores Campeões</h2><p class="page-sub">Quem mais levantou a taça</p>
+        <div class="sec-head"><div class="eyebrow">Hall da Fama</div><h2>Maiores campeões</h2><div class="cue" aria-hidden="true"></div></div>
         ${hall.length ? `<div class="podium">${hall.slice(0, 3).map(champCard).join('')}</div>
           ${hall.length > 3 ? `<div class="carousel" style="margin-top:14px">${hall.slice(3, 10).map((s, i) => champCard(s, i + 3)).join('')}</div>` : ''}
           <p style="text-align:center;margin-top:14px"><a href="#/hall">Ver Hall da Fama completo (${hall.length}) ▸</a></p>`
@@ -174,7 +203,8 @@
       </section>
 
       <section class="section">
-        <h2 class="section-title">Últimos torneios ${recs.length ? `<a href="#/historico">Histórico completo (${recs.length}) ▸</a>` : ''}</h2>
+        <div class="sec-head"><div class="eyebrow">Histórico</div><h2>Últimos torneios</h2><div class="cue" aria-hidden="true"></div></div>
+        ${recs.length ? `<p class="sec-link"><a href="#/historico">Histórico completo (${recs.length}) ▸</a></p>` : ''}
         ${recs.length ? recs.slice(0, 4).map((t) => tournamentCard(t)).join('') : '<div class="empty">Nenhum torneio finalizado ainda.</div>'}
       </section>`;
   }
@@ -275,12 +305,12 @@
         <p class="muted" style="font-size:12px;margin-top:10px">Torneio salvo no histórico automaticamente.</p></div>`;
     } else if (open) {
       const done = r.winners.filter(Boolean).length;
-      main = `<div class="card"><h2 class="section-title">Rodada ${t.rounds.length} <span class="muted mono" style="font-size:13px">${done}/${r.duels.length} definidos</span></h2>
+      main = `<div class="felt"><h2 class="section-title">Rodada ${t.rounds.length} <span class="mono felt__count">${done}/${r.duels.length} definidos</span></h2>
         ${can ? '<p class="muted" style="margin-top:-6px;font-size:13px">Toque no nome de quem venceu cada duelo.</p>' : ''}
         ${r.duels.map((d, i) => {
           const w = r.winners[i];
-          const btn = (n) => `<button class="pick ${w ? (w === n ? 'win' : 'lose') : ''}" data-duel="${i}" data-name="${h(n)}" ${can ? '' : 'disabled'}>${h(n)}</button>`;
-          return `<div class="duel ${state.justDrawn ? 'anim' : ''}" style="animation-delay:${i * 60}ms"><span class="n">DUELO ${i + 1}</span>${btn(d[0])}<span class="vs">vs</span>${btn(d[1])}</div>`;
+          const btn = (n) => `<button class="pick ${w ? (w === n ? 'win' : 'lose') : ''}" data-duel="${i}" data-name="${h(n)}" ${can ? '' : 'disabled'}>${pball(n, 'sm')}<span class="nm">${h(n)}</span></button>`;
+          return `<div class="duel ${state.justDrawn ? 'anim' : ''}" style="animation-delay:${i * 60}ms"><span class="n">DUELO ${i + 1}</span>${btn(d[0])}<span class="vs">${ball(8, 'xs')}</span>${btn(d[1])}</div>`;
         }).join('')}
         ${r.byes.map((b) => `<div class="bye">😴 <b>${h(b)}</b> descansa nesta rodada (bye)</div>`).join('')}
         ${can ? `<button class="btn btn-primary btn-block" id="closeRound" style="margin-top:14px" ${E.canCloseRound(t) ? '' : 'disabled'}>Confirmar resultados da rodada ${t.rounds.length}</button>` : ''}
@@ -299,7 +329,7 @@
         </div>
         <aside>
           <div class="card"><h3 style="margin:0 0 8px;font-size:15px">Na disputa (${alive.length})</h3>
-            <ul class="plist">${alive.map((p) => `<li><span>${h(p.name)}</span>${livesHtml(p, t.lives)}</li>`).join('')}</ul>
+            <ul class="plist">${alive.map((p) => `<li><span class="who">${pball(p.name, 'sm')}${h(p.name)}</span>${livesHtml(p, t.lives)}</li>`).join('')}</ul>
             ${out.length ? `<h3 style="margin:16px 0 8px;font-size:15px">Eliminados (${out.length})</h3>
               <ul class="plist">${out.map((p) => `<li class="out"><span>${h(p.name)}</span><span class="mono" style="font-size:11px">${p.withdrew ? 'saiu' : 'R' + p.eliminatedRound}</span></li>`).join('')}</ul>` : ''}
           </div>
@@ -366,7 +396,7 @@
   }
 
   function celebrate(t) {
-    overlay(`<div class="card modal celebrate"><div class="trophy">🏆</div><div class="muted">${h(t.name)}</div>
+    overlay(`<div class="card modal celebrate">${pball(t.winner, 'xl')}<div class="muted">${h(t.name)}</div>
       <h2>${h(t.winner)}</h2><div>${t.undefeated ? '<span class="tag gold">CAMPEÃO INVICTO</span>' : 'é o campeão!'}</div>
       <p class="muted">Vice: ${h(t.runnerUp || '—')}</p><button class="btn btn-primary" onclick="document.getElementById('overlay').click()">Fechar</button></div>`);
   }
@@ -384,7 +414,7 @@
 
     return `${head('Ranking', 'Estatísticas dos Jogadores', 'Desempenho completo em duelos e torneios')}
       ${rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(([c, l]) => `<th data-sort="${c}" class="${c === 'name' ? 'name' : ''} ${rankSort.key === c ? 'sorted' : ''}">${l}${rankSort.key === c ? (rankSort.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map((s) => { const p = pos.get(s.name); return `<tr class="rank-${p}"><td>${p}</td><td class="name"><a href="#/1x1?a=${encodeURIComponent(s.name)}">${h(s.name)}</a></td><td>${s.titles}</td><td>${s.vices}</td><td>${s.undefeated}</td><td>${s.participations}</td><td>${s.wins}</td><td>${s.losses}</td>
+        <tbody>${rows.map((s) => { const p = pos.get(s.name); return `<tr class="rank-${p}"><td>${p <= 3 ? ball(p, 'xs') : p}</td><td class="name"><a class="who" href="#/1x1?a=${encodeURIComponent(s.name)}">${pball(s.name, 'sm')}${h(s.name)}</a></td><td>${s.titles}</td><td>${s.vices}</td><td>${s.undefeated}</td><td>${s.participations}</td><td>${s.wins}</td><td>${s.losses}</td>
           <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(s.winPct)}<div class="bar"><i style="width:${s.winPct}%"></i></div></div></td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`; }).join('')}</tbody></table></div>`
         : '<div class="empty">Nenhum jogador registrado ainda. Finalize um torneio para aparecer aqui.</div>'}
       <section class="section card"><h2 class="section-title">Como os pontos são calculados</h2>
@@ -417,9 +447,9 @@
       };
       body = `
         <div class="card" style="margin-top:18px"><div class="score">
-          <div><div class="num ${r.a > r.b ? 'lead' : ''}">${r.a}</div><div class="who">${h(a)}</div></div>
-          <div class="muted mono">${plural(r.duels.length, 'duelo', 'duelos')}</div>
-          <div><div class="num ${r.b > r.a ? 'lead' : ''}">${r.b}</div><div class="who">${h(b)}</div></div></div>
+          <div>${pball(a, 'lg')}<div class="num ${r.a > r.b ? 'lead' : ''}">${r.a}</div><div class="who">${h(a)}</div></div>
+          <div class="score__mid">${ball(8, 'lg')}<div class="mono">${plural(r.duels.length, 'duelo', 'duelos')}</div></div>
+          <div>${pball(b, 'lg')}<div class="num ${r.b > r.a ? 'lead' : ''}">${r.b}</div><div class="who">${h(b)}</div></div></div>
           ${r.duels.length ? `<div class="bar" style="height:10px;margin-top:16px"><i style="width:${(r.a / r.duels.length) * 100}%"></i></div>` : ''}
         </div>
         <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:14px">
@@ -495,7 +525,7 @@
         <div class="grid grid-3 highlights">${hl.map(([ico, label, r, fmt]) => `<div class="card"><div class="ico">${ico}</div><small>${label}</small><b>${r ? h(r.name) : '—'}</b><small>${r ? fmt(r) : ''}</small></div>`).join('')}</div>
         <section class="section"><h2 class="section-title">Power Ranking de ${fmtMonth(monthSel)}</h2>
           <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Nome</th><th>🏆</th><th>⭐</th><th>🥈</th><th>✅ V</th><th>❌ D</th><th>📊 %</th><th>🎱</th><th>Pts</th></tr></thead>
-          <tbody>${rows.map((s, i) => `<tr class="rank-${i + 1}"><td>${i + 1}</td><td class="name">${h(s.name)}</td><td>${s.titles}</td><td>${s.undefeated}</td><td>${s.vices}</td><td>${s.wins}</td><td>${s.losses}</td><td>${pct(s.winPct)}</td><td>${s.participations}</td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`).join('')}</tbody></table></div>
+          <tbody>${rows.map((s, i) => `<tr class="rank-${i + 1}"><td>${i < 3 ? ball(i + 1, 'xs') : i + 1}</td><td class="name"><span class="who">${pball(s.name, 'sm')}${h(s.name)}</span></td><td>${s.titles}</td><td>${s.undefeated}</td><td>${s.vices}</td><td>${s.wins}</td><td>${s.losses}</td><td>${pct(s.winPct)}</td><td>${s.participations}</td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`).join('')}</tbody></table></div>
           <p class="legend">Pontuação: 🏆 Título = ${sc.title} · ⭐ Invicto = +${sc.undefeated} · 🥈 Vice = ${sc.vice} · ✅ Vitória em duelo = ${sc.win} · 🎱 Participação = ${sc.participation}. “Melhor aproveitamento” exige ao menos 5 duelos no mês.</p></section>`
         : '<div class="empty">Nenhum dado disponível ainda.</div>'}`;
   }
@@ -604,6 +634,7 @@
       c.whatsapp && `<a href="https://wa.me/${encodeURIComponent(c.whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>`,
       c.instagram && `<a href="https://instagram.com/${encodeURIComponent(c.instagram)}" target="_blank" rel="noopener">Instagram</a>`,
     ].filter(Boolean).join('');
+    if (C.photoCredits) $('#footCredits').innerHTML = 'Fotos: ' + C.photoCredits.map(([n, u]) => `<a href="${h(u)}" target="_blank" rel="noopener">${h(n)}</a>`).join(', ') + ' / Unsplash';
     $('#navToggle').addEventListener('click', () => { const n = $('#nav'); n.classList.toggle('open'); $('#navToggle').setAttribute('aria-expanded', n.classList.contains('open')); });
     $('#nav').addEventListener('click', (e) => { if (e.target.tagName === 'A') $('#nav').classList.remove('open'); });
     window.addEventListener('hashchange', render);
