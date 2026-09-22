@@ -15,6 +15,7 @@
     mode: 'local',
     async init() {},
     canWrite: () => true,
+    isAdmin: () => true,
     user: () => null,
     async listTournaments() { return lsGet(LK.t, []); },
     async saveTournament(rec) {
@@ -33,7 +34,14 @@
   function makeSupabaseStore() {
     const sb = window.supabase.createClient(C.supabaseUrl, C.supabaseAnonKey);
     let session = null;
+    let admin = false; // confirmado no banco (tabela admins), não no navegador
     const authCbs = [];
+    async function checkAdmin() {
+      admin = false;
+      if (!session) return;
+      const { data } = await sb.from('admins').select('user_id').eq('user_id', session.user.id).maybeSingle();
+      admin = !!data;
+    }
     const fail = (error) => { if (error) throw new Error(error.message); };
     const toRow = (r) => ({ id: r.id, name: r.name, date: r.date || null, data: r });
 
@@ -42,12 +50,20 @@
       async init() {
         const { data } = await sb.auth.getSession();
         session = data.session;
-        sb.auth.onAuthStateChange((_e, s) => { session = s; authCbs.forEach((f) => f(s)); });
+        await checkAdmin();
+        sb.auth.onAuthStateChange(async (_e, s) => { session = s; await checkAdmin(); authCbs.forEach((f) => f(s)); });
       },
-      canWrite: () => !!session,
+      // Só o administrador cadastrado no banco pode alterar dados.
+      // (A proteção real está nas regras RLS do banco — ver schema.sql.)
+      canWrite: () => !!session && admin,
+      isAdmin: () => admin,
       user: () => session && session.user,
-      async signIn(email, password) { const { error } = await sb.auth.signInWithPassword({ email, password }); fail(error); },
-      async signOut() { await sb.auth.signOut(); },
+      async signIn(email, password) {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password }); fail(error);
+        session = data.session; await checkAdmin();
+        if (!admin) { await sb.auth.signOut(); session = null; throw new Error('Esta conta não tem permissão de administrador.'); }
+      },
+      async signOut() { await sb.auth.signOut(); session = null; admin = false; },
       onAuth(cb) { authCbs.push(cb); },
       async listTournaments() {
         const out = []; let from = 0; const page = 1000;

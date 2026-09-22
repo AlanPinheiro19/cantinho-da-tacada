@@ -171,7 +171,7 @@
             <div class="eyebrow">Clube de sinuca · desde a primeira tacada</div>
             <h1>${h(C.clubName)}</h1>
             <p>${h(C.tagline)}. Sorteio de duelos, placar ao vivo, ranking e o histórico de cada torneio da casa.</p>
-            <div class="btn-row"><a class="btn btn-primary btn-lg" href="#/sorteio">${live ? 'Acompanhar ao vivo' : 'Montar torneio'}</a><a class="btn btn-ghost btn-lg" href="#/ranking">Ver ranking</a></div>
+            <div class="btn-row"><a class="btn btn-primary btn-lg" href="${live || S.canWrite() ? '#/sorteio' : '#/historico'}">${live ? 'Acompanhar ao vivo' : S.canWrite() ? 'Montar torneio' : 'Ver torneios'}</a><a class="btn btn-ghost btn-lg" href="#/ranking">Ver ranking</a></div>
           </div>
           <aside class="hero__card">
             ${live ? `<div class="live-tag"><span class="pulse"></span>AO VIVO · RODADA ${cur.rounds.length || 1}</div>
@@ -182,7 +182,7 @@
             : top ? `<div class="live-tag gold">Maior campeão</div>
               <div class="hero__champ">${pball(top.name, 'lg')}<div><h2>${h(top.name)}</h2><p>${plural(top.titles, 'título', 'títulos')} · ${plural(top.vices, 'vice', 'vices')}</p></div></div>
               <a class="btn btn-ghost btn-block" href="#/hall">Hall da Fama</a>`
-            : `<div class="live-tag">Primeira partida</div><h2>A mesa está livre</h2><p>Cadastre os jogadores e sorteie os primeiros duelos.</p><a class="btn btn-primary btn-block" href="#/sorteio">Começar</a>`}
+            : (S.canWrite() ? `<div class="live-tag">Primeira partida</div><h2>A mesa está livre</h2><p>Cadastre os jogadores e sorteie os primeiros duelos.</p><a class="btn btn-primary btn-block" href="#/sorteio">Começar</a>` : `<div class="live-tag">Em breve</div><h2>A mesa está livre</h2><p>Os torneios aparecem aqui assim que o primeiro for disputado.</p>`)}
           </aside>
         </div>
       </section>
@@ -220,6 +220,11 @@
 
   function viewSetup() {
     const can = S.canWrite();
+    if (!can && S.mode === 'supabase') {
+      return `${head('Sorteio', 'Nenhum torneio em andamento', 'Quando o administrador sortear os duelos, eles aparecem aqui ao vivo.')}
+        <div class="empty" style="max-width:640px;margin:0 auto">A mesa está livre no momento. Veja o <a href="#/ranking">ranking</a> ou o <a href="#/historico">histórico</a> enquanto isso.</div>
+        <p style="text-align:center;margin-top:18px;font-size:14px" class="muted">É o administrador? <a href="#/config">Entrar</a></p>`;
+    }
     const known = E.allPlayers(state.records).filter((n) => !draft.players.some((p) => E.key(p) === E.key(n)));
     const freq = E.playerStats(state.records).sort((a, b) => b.participations - a.participations).map((s) => s.name)
       .filter((n) => known.includes(n)).slice(0, 24);
@@ -534,6 +539,7 @@
   // ---------- Configurações / backup ----------
   function loginHint(live) {
     if (S.mode !== 'supabase') return '';
+    if (live) return '<div class="card" style="margin:0 auto 18px;text-align:center;font-size:14px"><span class="pulse"></span>Placar ao vivo: os resultados aparecem aqui assim que o administrador lança.</div>';
     return `<div class="card" style="margin:0 auto 16px;max-width:760px;text-align:center;font-size:14px">${live ? '👀 Você está vendo o placar ao vivo. ' : ''}Para ${live ? 'lançar resultados' : 'criar torneios'}, <a href="#/config">entre como administrador</a>.</div>`;
   }
 
@@ -543,10 +549,10 @@
     return `${head('Configurações', 'Dados e Backup', sb ? 'Modo online (Supabase)' : 'Modo local — dados salvos neste navegador')}
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
         ${sb ? `<div class="card"><h3 style="margin-top:0">Administrador</h3>
-          ${S.user() ? `<p>Conectado como <b>${h(S.user().email)}</b>.</p><button class="btn" id="logout">Sair</button>`
+          ${S.user() ? `<p>Conectado como administrador: <b>${h(S.user().email)}</b>.</p><button class="btn" id="logout">Sair</button>`
             : `<form id="loginForm" style="display:grid;gap:10px"><input class="input" id="lEmail" type="email" placeholder="E-mail" required autocomplete="username">
               <input class="input" id="lPass" type="password" placeholder="Senha" required autocomplete="current-password"><button class="btn btn-primary">Entrar</button></form>
-              <p class="muted" style="font-size:12px">Usuários são criados no painel do Supabase (Authentication → Users).</p>`}</div>`
+              <p class="muted" style="font-size:12px">Acesso restrito ao administrador do clube. Visitantes podem ver tudo sem entrar.</p>`}</div>`
           : `<div class="card"><h3 style="margin-top:0">Modo local</h3><p class="muted" style="font-size:14px">Tudo fica salvo só neste navegador. Faça backups com frequência. Para placar online compartilhado, configure o Supabase em <code>config.js</code> (veja o README).</p></div>`}
         <div class="card"><h3 style="margin-top:0">Backup</h3>
           <p class="muted" style="font-size:14px">${plural(state.records.length, 'torneio', 'torneios')} · ${plural(players.length, 'jogador', 'jogadores')}</p>

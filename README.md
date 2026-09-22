@@ -30,22 +30,29 @@ Abra `index.html` no navegador (duplo clique) — pronto. Os dados ficam salvos 
 
 (Alternativas: Cloudflare Pages ou Vercel — basta importar o repositório, sem configuração de build.)
 
-## Placar online compartilhado (Supabase, opcional)
-Para que todos vejam o mesmo placar em qualquer celular, **ao vivo**:
+## Placar online + acesso só do administrador (Supabase)
+Com o Supabase configurado, **todos os visitantes veem** o mesmo placar (ao vivo), mas **só o administrador** pode criar torneios, lançar resultados, incluir jogadores, importar, renomear ou excluir. A regra é aplicada no banco (RLS), não só na tela.
 
 1. Crie uma conta grátis em https://supabase.com e um novo projeto.
-2. Abra **SQL Editor**, cole o conteúdo de `schema.sql` e clique em **Run**.
-3. Em **Authentication → Users → Add user**, crie o usuário administrador (e-mail + senha, marque *Auto Confirm*).
-4. Em **Project Settings → API**, copie a *Project URL* e a chave *anon public* e cole em `config.js`:
+2. **SQL Editor** → cole `schema.sql` → **Run**.
+3. **Authentication → Users → Add user → Create new user**: seu e-mail + senha forte, marque *Auto Confirm User*.
+4. No **SQL Editor**, rode (com o seu e-mail):
+   ```sql
+   insert into public.admins (user_id)
+     select id from auth.users where email = 'seu-email@exemplo.com'
+     on conflict do nothing;
+   ```
+5. **Authentication → Sign In / Providers**: desligue **Allow new users to sign up** (ninguém mais consegue criar conta).
+6. **Project Settings → API**: copie *Project URL* e a chave *anon public* para `config.js`:
    ```js
    supabaseUrl: 'https://xxxx.supabase.co',
    supabaseAnonKey: 'eyJ...',
    ```
-5. Publique de novo. Visitantes só **leem**; para criar torneios e lançar resultados, entre em ⚙ com o usuário admin.
+7. Envie o `config.js` ao GitHub. No site, entre em **⚙ → Entrar** com seu e-mail e senha.
 
-> A chave *anon* pode ficar pública: a segurança é garantida pelas políticas RLS do `schema.sql` (leitura pública, escrita só para usuário logado).
+> A chave *anon* pode ficar pública: ela só permite **ler**. Escrever exige estar logado **e** constar na tabela `admins`.
 
-Migrando do modo local: exporte o JSON antes, configure o Supabase, entre como admin e importe o arquivo em ⚙.
+Migrando do modo local: exporte o JSON antes (⚙), configure o Supabase, entre como admin e importe o arquivo.
 
 ## Personalizar
 Tudo em `config.js`: nome do clube, frase, vidas padrão, WhatsApp/Instagram do rodapé e a pontuação do ranking e do mês. Cores em `style.css` (variáveis no topo).
