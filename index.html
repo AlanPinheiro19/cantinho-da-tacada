@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cantinho da Tacada</title>
+  <meta name="description" content="Placar, sorteio de duelos, ranking e histórico dos torneios de sinuca do Cantinho da Tacada." />
+  <meta name="theme-color" content="#0b1210" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23111'/%3E%3Ccircle cx='32' cy='32' r='14' fill='%23fff'/%3E%3Ctext x='32' y='39' font-size='18' font-family='Arial' font-weight='700' text-anchor='middle'%3E8%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="#/">
+        <span class="brand__ball" aria-hidden="true"></span>
+        <span class="brand__text"><strong id="brandName">Cantinho da Tacada</strong><small id="brandTag"></small></span>
+      </a>
+      <button class="nav-toggle" id="navToggle" aria-label="Abrir menu" aria-expanded="false">☰</button>
+      <nav class="nav" id="nav">
+        <a href="#/" data-route="">Início</a>
+        <a href="#/sorteio" data-route="sorteio">Sorteio</a>
+        <a href="#/ranking" data-route="ranking">Ranking</a>
+        <a href="#/1x1" data-route="1x1">1x1</a>
+        <a href="#/historico" data-route="historico">Histórico</a>
+        <a href="#/hall" data-route="hall">Hall da Fama</a>
+        <a href="#/mes" data-route="mes">Melhores do Mês</a>
+        <a href="#/config" data-route="config" title="Configurações e backup">⚙</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="view" class="container" aria-live="polite"></main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div><strong id="footName">Cantinho da Tacada</strong><div class="muted" id="footMode"></div></div>
+      <div class="footer__links" id="footContact"></div>
+    </div>
+  </footer>
+
+  <div class="overlay" id="overlay" hidden></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <!-- Supabase JS (open source, MIT) — só é usado se configurado em config.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" defer></script>
+  <script src="config.js" defer></script>
+  <script src="engine.js" defer></script>
+  <script src="store.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
