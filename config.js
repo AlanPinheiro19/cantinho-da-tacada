@@ -12,8 +12,8 @@ window.CTD_CONFIG = {
   // ---- Supabase (opcional) ----
   // Deixe em branco para salvar tudo só neste navegador (modo local).
   // Preencha para ter placar online compartilhado (veja README.md).
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  supabaseUrl: 'https://gbqycjkqfbhznvocyccw.supabase.co',
+  supabaseAnonKey: 'sb_publishable_2KtldBbGfnfmX7Kkf2uvPg_b_EqktyY',
 
   // ---- Fotos (troque por fotos do seu clube quando quiser) ----
   // Pode ser um link da internet ou um arquivo enviado ao repositório (ex.: 'fotos/mesa.jpg').
