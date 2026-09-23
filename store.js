@@ -15,7 +15,9 @@
     mode: 'local',
     async init() {},
     canWrite: () => true,
+    canScore: () => true,
     isAdmin: () => true,
+    role: () => 'admin',
     user: () => null,
     async listTournaments() { return lsGet(LK.t, []); },
     async saveTournament(rec) {
@@ -34,13 +36,17 @@
   function makeSupabaseStore() {
     const sb = window.supabase.createClient(C.supabaseUrl, C.supabaseAnonKey);
     let session = null;
-    let admin = false; // confirmado no banco (tabela admins), não no navegador
+    let admin = false;   // confirmado no banco (tabela admins), não no navegador
+    let profile = null;  // perfil de marcador (tabela profiles)
     const authCbs = [];
     async function checkAdmin() {
-      admin = false;
+      admin = false; profile = null;
       if (!session) return;
-      const { data } = await sb.from('admins').select('user_id').eq('user_id', session.user.id).maybeSingle();
-      admin = !!data;
+      const [a, p] = await Promise.all([
+        sb.from('admins').select('user_id').eq('user_id', session.user.id).maybeSingle(),
+        sb.from('profiles').select('name, blocked').eq('user_id', session.user.id).maybeSingle(),
+      ]);
+      admin = !!a.data; profile = p.data || null;
     }
     const fail = (error) => { if (error) throw new Error(error.message); };
     const toRow = (r) => ({ id: r.id, name: r.name, date: r.date || null, data: r });
@@ -53,17 +59,32 @@
         await checkAdmin();
         sb.auth.onAuthStateChange(async (_e, s) => { session = s; await checkAdmin(); authCbs.forEach((f) => f(s)); });
       },
-      // Só o administrador cadastrado no banco pode alterar dados.
-      // (A proteção real está nas regras RLS do banco — ver schema.sql.)
+      // Permissões (a proteção real está nas regras do banco — ver schema.sql):
+      //  administrador: tudo · marcador: só lança placar do torneio em andamento
       canWrite: () => !!session && admin,
+      canScore: () => !!session && (admin || (!!profile && !profile.blocked)),
       isAdmin: () => admin,
+      role: () => (!session ? null : admin ? 'admin' : profile && !profile.blocked ? 'scorer' : 'blocked'),
       user: () => session && session.user,
+      displayName: () => (profile && profile.name) || (session && session.user.email) || '',
       async signIn(email, password) {
-        const { data, error } = await sb.auth.signInWithPassword({ email, password }); fail(error);
+        const { data, error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) throw new Error(/invalid/i.test(error.message) ? 'E-mail ou senha incorretos.' : error.message);
         session = data.session; await checkAdmin();
-        if (!admin) { await sb.auth.signOut(); session = null; throw new Error('Esta conta não tem permissão de administrador.'); }
+        if (!admin && (!profile || profile.blocked)) { await sb.auth.signOut(); session = null; throw new Error('Esta conta está bloqueada. Fale com o administrador.'); }
       },
-      async signOut() { await sb.auth.signOut(); session = null; admin = false; },
+      async signUp(name, email, password) {
+        const { data, error } = await sb.auth.signUp({ email, password, options: { data: { name } } });
+        if (error) throw new Error(/registered|already/i.test(error.message) ? 'Este e-mail já tem conta. Use "Entrar".' : /password/i.test(error.message) ? 'Senha fraca: use pelo menos 6 caracteres.' : error.message);
+        if (!data.session) return 'confirm'; // projeto exige confirmação por e-mail
+        session = data.session; await checkAdmin(); return 'ok';
+      },
+      async signOut() { await sb.auth.signOut(); session = null; admin = false; profile = null; },
+      async listProfiles() {
+        const { data, error } = await sb.from('profiles').select('user_id, name, email, blocked, created_at').order('created_at', { ascending: false });
+        fail(error); return data;
+      },
+      async setBlocked(userId, blocked) { const { error } = await sb.from('profiles').update({ blocked }).eq('user_id', userId); fail(error); },
       onAuth(cb) { authCbs.push(cb); },
       async listTournaments() {
         const out = []; let from = 0; const page = 1000;
@@ -74,7 +95,11 @@
         }
         return out;
       },
-      async saveTournament(rec) { const { error } = await sb.from('tournaments').upsert(toRow(rec)); fail(error); },
+      async saveTournament(rec) {
+        // marcador só pode INSERIR o torneio que acabou de terminar; admin pode editar
+        const q = admin ? sb.from('tournaments').upsert(toRow(rec)) : sb.from('tournaments').insert(toRow(rec));
+        const { error } = await q; if (error && !/duplicate/i.test(error.message)) fail(error);
+      },
       async deleteTournament(id) { const { error } = await sb.from('tournaments').delete().eq('id', id); fail(error); },
       async replaceAll(recs) {
         const { error: e1 } = await sb.from('tournaments').delete().neq('id', '00000000-0000-0000-0000-000000000000'); fail(e1);
@@ -87,7 +112,8 @@
         fail(error); return data ? data.data : null;
       },
       async setCurrent(t) {
-        const { error } = await sb.from('current_tournament').upsert({ id: 1, data: t, updated_at: new Date().toISOString() }); fail(error);
+        const q = admin ? sb.from('current_tournament').upsert({ id: 1, data: t }) : sb.from('current_tournament').update({ data: t }).eq('id', 1);
+        const { error } = await q; fail(error);
       },
       onCurrentChange(cb) {
         sb.channel('current').on('postgres_changes', { event: '*', schema: 'public', table: 'current_tournament' },

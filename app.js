@@ -94,7 +94,11 @@
     state.loaded = true;
   }
 
-  async function saveCurrent() { await S.setCurrent(state.current); }
+  const lastBy = (t) => t && t.lastBy;
+  async function saveCurrent() {
+    if (state.current && S.mode === 'supabase' && S.user()) state.current.lastBy = S.displayName();
+    await S.setCurrent(state.current);
+  }
 
   function snapshot() {
     state.undo.push(JSON.stringify(state.current));
@@ -102,8 +106,8 @@
   }
 
   // Muta o torneio atual com desfazer + persistência + histórico ao terminar
-  async function mutate(fn) {
-    if (!S.canWrite()) throw new Error('Entre como administrador para alterar o torneio.');
+  async function mutate(fn, { admin = false } = {}) {
+    if (admin ? !S.canWrite() : !S.canScore()) throw new Error(admin ? 'Só o administrador pode fazer isso.' : 'Entre na sua conta para lançar o placar.');
     const wasFinished = state.current && state.current.status === 'finished';
     snapshot();
     try { fn(state.current); } catch (e) { state.undo.pop(); throw e; }
@@ -222,9 +226,9 @@
   function viewSetup() {
     const can = S.canWrite();
     if (!can && S.mode === 'supabase') {
-      return `${head('Sorteio', 'Nenhum torneio em andamento', 'Quando o administrador sortear os duelos, eles aparecem aqui ao vivo.')}
+      return `${head('Sorteio', 'Nenhum torneio em andamento', 'Quando o administrador criar o torneio, os duelos aparecem aqui ao vivo.')}
         <div class="empty" style="max-width:640px;margin:0 auto">A mesa está livre no momento. Veja o <a href="#/ranking">ranking</a> ou o <a href="#/historico">histórico</a> enquanto isso.</div>
-        <p style="text-align:center;margin-top:18px;font-size:14px" class="muted">É o administrador? <a href="#/config">Entrar</a></p>`;
+        ${S.user() ? '' : '<p style="text-align:center;margin-top:18px;font-size:14px" class="muted">Quer ajudar a lançar o placar? <a href="#/config">Entre ou crie sua conta</a></p>'}`;
     }
     const known = E.allPlayers(state.records).filter((n) => !draft.players.some((p) => E.key(p) === E.key(n)));
     const freq = E.playerStats(state.records).sort((a, b) => b.participations - a.participations).map((s) => s.name)
@@ -300,7 +304,8 @@
   }
 
   function viewRunning(t) {
-    const can = S.canWrite();
+    const can = S.canScore();      // lança placar (marcador ou admin)
+    const adm = S.canWrite();      // gerencia o torneio (só admin)
     const r = E.currentRound(t);
     const open = E.roundOpen(r);
     const finished = t.status === 'finished';
@@ -312,7 +317,7 @@
     if (finished) {
       main = `<div class="card celebrate"><div class="trophy">🏆</div><div class="muted">Campeão${t.undefeated ? ' INVICTO' : ''}</div><h2>${h(t.winner)}</h2>
         <div class="muted">Vice: <b style="color:var(--text)">${h(t.runnerUp || '—')}</b> · ${plural(closed.length, 'rodada', 'rodadas')}</div>
-        <div class="btn-row" style="justify-content:center;margin-top:18px">${can ? '<button class="btn btn-primary" id="newT">Novo torneio</button>' : ''}<a class="btn" href="#/historico">Ver no histórico</a></div>
+        <div class="btn-row" style="justify-content:center;margin-top:18px">${adm ? '<button class="btn btn-primary" id="newT">Novo torneio</button>' : ''}<a class="btn" href="#/historico">Ver no histórico</a></div>
         <p class="muted" style="font-size:12px;margin-top:10px">Torneio salvo no histórico automaticamente.</p></div>`;
     } else if (open) {
       const done = r.winners.filter(Boolean).length;
@@ -328,12 +333,12 @@
       </div>`;
     } else {
       main = `<div class="card" style="text-align:center"><h2 style="margin-top:0">Rodada ${t.rounds.length} encerrada</h2>
-        <p class="muted">${plural(alive.length, 'jogador vivo', 'jogadores vivos')}. ${can ? 'Ajuste participantes se precisar e sorteie a próxima.' : 'Aguardando o próximo sorteio…'}</p>
+        <p class="muted">${plural(alive.length, 'jogador vivo', 'jogadores vivos')}. ${can ? (adm ? 'Ajuste participantes se precisar e sorteie a próxima.' : 'Sorteie a próxima rodada.') : 'Aguardando o próximo sorteio…'}</p>
         ${can ? `<button class="btn btn-primary" id="drawNext">🎱 Sortear rodada ${t.rounds.length + 1}</button>` : ''}</div>`;
     }
 
     return `${head(finished ? 'Torneio finalizado' : 'Torneio em andamento', t.name, `${fmtDate(t.date)} · ${plural(t.participants.length, 'jogador', 'jogadores')} · ${t.lives} vidas · ${E.isRanked(t) ? 'Vale para o ranking' : 'Amistoso (não vale ranking)'}`)}
-      ${!can ? loginHint(true) : ''}
+      ${!can ? loginHint(true) : ''}${S.mode === 'supabase' && lastBy(t) ? `<p class="muted" style="text-align:center;margin:-18px 0 18px;font-size:13px">Último lançamento por <b>${h(lastBy(t))}</b></p>` : ''}
       <div class="t-layout">
         <div>${main}
           ${closed.length ? `<div class="card" style="margin-top:14px"><details class="rounds" style="border:0;margin:0;padding:0" ${finished ? 'open' : ''}><summary>Rodadas anteriores (${closed.length})</summary>${roundsHtml(closed)}</details></div>` : ''}
@@ -344,7 +349,12 @@
             ${out.length ? `<h3 style="margin:16px 0 8px;font-size:15px">Eliminados (${out.length})</h3>
               <ul class="plist">${out.map((p) => `<li class="out"><span>${h(p.name)}</span><span class="mono" style="font-size:11px">${p.withdrew ? 'saiu' : 'R' + p.eliminatedRound}</span></li>`).join('')}</ul>` : ''}
           </div>
-          ${can ? `<div class="card" style="margin-top:14px;display:grid;gap:8px">
+          ${can && !adm ? `<div class="card" style="margin-top:14px;display:grid;gap:8px">
+            <div class="muted" style="font-size:13px">Você é <b>marcador</b>: pode lançar vencedores, confirmar rodadas e sortear a próxima.</div>
+            ${!finished ? `<button class="btn btn-sm" id="undoBtn" ${state.undo.length ? '' : 'disabled'}>↶ Desfazer minha última ação</button>` : ''}
+            ${open && !r.winners.some(Boolean) ? '<button class="btn btn-sm" id="redrawBtn">⟳ Refazer sorteio da rodada</button>' : ''}
+          </div>` : ''}
+          ${adm ? `<div class="card" style="margin-top:14px;display:grid;gap:8px">
             <button class="btn btn-sm" id="rankT" title="Alterar se este torneio conta para o ranking">${E.isRanked(t) ? '🏆 Vale ranking: SIM' : '🤝 Amistoso: não vale ranking'}</button>
             <button class="btn btn-sm" id="undoBtn" ${state.undo.length ? '' : 'disabled'}>↶ Desfazer última ação</button>
             ${!finished ? `<button class="btn btn-sm" id="lateBtn" ${open ? 'disabled title="Disponível entre rodadas"' : ''}>＋ Incluir jogador</button>
@@ -367,7 +377,7 @@
     on('#redrawBtn', async () => { await mutate((x) => { x.rounds.pop(); E.drawRound(x); }); await drawAnimation(state.current); render(); });
     on('#undoBtn', undo);
     on('#rankT', async () => {
-      await mutate((x) => { x.ranked = !E.isRanked(x); });
+      await mutate((x) => { x.ranked = !E.isRanked(x); }, { admin: true });
       if (state.current.status === 'finished') { const rec = E.toRecord(state.current); await S.saveTournament(rec); state.records = state.records.filter((r) => r.id !== rec.id).concat(rec); }
       toast(E.isRanked(state.current) ? 'Torneio vale para o ranking' : 'Torneio marcado como amistoso'); render();
     });
@@ -381,7 +391,7 @@
         <select class="input" id="wdSel">${E.alive(t).map((p) => `<option>${h(p.name)}</option>`).join('')}</select>
         <div class="btn-row" style="margin-top:14px"><button class="btn btn-primary" id="wdOk">Confirmar</button><button class="btn" id="wdX">Voltar</button></div></div>`);
       $('#wdX', o).onclick = closeOverlay;
-      $('#wdOk', o).onclick = () => guard(async () => { const n = $('#wdSel', o).value; closeOverlay(); await mutate((x) => E.withdraw(x, n)); render(); });
+      $('#wdOk', o).onclick = () => guard(async () => { const n = $('#wdSel', o).value; closeOverlay(); await mutate((x) => E.withdraw(x, n), { admin: true }); render(); });
     });
     on('#lateBtn', async () => {
       const known = E.allPlayers(state.records).filter((n) => !t.participants.some((p) => E.key(p.name) === E.key(n)));
@@ -392,7 +402,7 @@
       $('#lateX', o).onclick = closeOverlay;
       $('#lateOk', o).onclick = () => guard(async () => {
         const n = $('#lateName', o).value, l = +$('#lateLoss', o).value || 0;
-        await mutate((x) => E.addLatePlayer(x, n, l)); closeOverlay(); render();
+        await mutate((x) => E.addLatePlayer(x, n, l), { admin: true }); closeOverlay(); render();
       });
     });
   }
@@ -664,20 +674,37 @@
   // ---------- Configurações / backup ----------
   function loginHint(live) {
     if (S.mode !== 'supabase') return '';
-    if (live) return '<div class="card" style="margin:0 auto 18px;text-align:center;font-size:14px"><span class="pulse"></span>Placar ao vivo: os resultados aparecem aqui assim que o administrador lança.</div>';
+    if (live) return '<div class="card" style="margin:0 auto 18px;text-align:center;font-size:14px"><span class="pulse"></span>Placar ao vivo. Quer lançar os resultados? <a href="#/config">Entre ou crie sua conta de marcador</a>.</div>';
     return `<div class="card" style="margin:0 auto 16px;max-width:760px;text-align:center;font-size:14px">${live ? '👀 Você está vendo o placar ao vivo. ' : ''}Para ${live ? 'lançar resultados' : 'criar torneios'}, <a href="#/config">entre como administrador</a>.</div>`;
+  }
+
+  let accTab = 'login';
+  function accountCard() {
+    if (S.user()) {
+      const role = S.role();
+      return `<div class="card"><h3 style="margin-top:0">Minha conta</h3>
+        <div class="who" style="margin-bottom:10px">${pball(S.displayName(), 'lg')}<div><b style="font-size:18px">${h(S.displayName())}</b><div class="muted" style="font-size:13px">${h(S.user().email)}</div></div></div>
+        <p>${role === 'admin' ? '<span class="tag gold">ADMINISTRADOR</span> Acesso total.' : role === 'scorer' ? '<span class="tag green">MARCADOR</span> Pode lançar o placar do torneio em andamento.' : '<span class="tag red">BLOQUEADO</span> Fale com o administrador.'}</p>
+        <div class="btn-row">${role !== 'blocked' ? '<a class="btn btn-primary" href="#/sorteio">Ir para o placar</a>' : ''}<button class="btn" id="logout">Sair</button></div></div>`;
+    }
+    const tab = (k, l) => `<button class="seg__btn ${accTab === k ? 'on' : ''}" data-acc="${k}">${l}</button>`;
+    return `<div class="card"><h3 style="margin-top:0">Acesso</h3>
+      <div class="seg" style="margin-bottom:14px">${tab('login', 'Entrar')}${tab('signup', 'Criar conta')}</div>
+      ${accTab === 'login'
+        ? `<form id="loginForm" style="display:grid;gap:10px"><input class="input" id="lEmail" type="email" placeholder="E-mail" required autocomplete="username">
+            <input class="input" id="lPass" type="password" placeholder="Senha" required autocomplete="current-password"><button class="btn btn-primary">Entrar</button></form>`
+        : `<form id="signupForm" style="display:grid;gap:10px"><input class="input" id="sName" placeholder="Seu nome ou apelido" required maxlength="40" autocomplete="nickname">
+            <input class="input" id="sEmail" type="email" placeholder="E-mail" required autocomplete="email">
+            <input class="input" id="sPass" type="password" placeholder="Senha (mín. 6 caracteres)" required minlength="6" autocomplete="new-password"><button class="btn btn-primary">Criar conta de marcador</button></form>`}
+      <p class="muted" style="font-size:12.5px;margin-bottom:0">Visitantes veem tudo sem entrar. Com uma conta de <b>marcador</b> você lança os vencedores dos duelos do torneio em andamento.</p></div>`;
   }
 
   function viewConfig() {
     const sb = S.mode === 'supabase';
     const players = E.allPlayers(state.records);
-    return `${head('Configurações', 'Dados e Backup', sb ? 'Modo online (Supabase)' : 'Modo local — dados salvos neste navegador')}
+    return `${head(sb ? 'Conta' : 'Configurações', sb ? (S.user() ? 'Minha conta' : 'Entrar ou criar conta') : 'Dados e Backup', sb ? 'Visitantes veem tudo · marcadores lançam o placar · o administrador gerencia os torneios' : 'Modo local — dados salvos neste navegador')}
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
-        ${sb ? `<div class="card"><h3 style="margin-top:0">Administrador</h3>
-          ${S.user() ? `<p>Conectado como administrador: <b>${h(S.user().email)}</b>.</p><button class="btn" id="logout">Sair</button>`
-            : `<form id="loginForm" style="display:grid;gap:10px"><input class="input" id="lEmail" type="email" placeholder="E-mail" required autocomplete="username">
-              <input class="input" id="lPass" type="password" placeholder="Senha" required autocomplete="current-password"><button class="btn btn-primary">Entrar</button></form>
-              <p class="muted" style="font-size:12px">Acesso restrito ao administrador do clube. Visitantes podem ver tudo sem entrar.</p>`}</div>`
+        ${sb ? accountCard() + (S.canWrite() ? '<div class="card" id="usersCard"><h3 style="margin-top:0">Marcadores cadastrados</h3><div class="muted">⏳ Carregando…</div></div>' : '')
           : `<div class="card"><h3 style="margin-top:0">Modo local</h3><p class="muted" style="font-size:14px">Tudo fica salvo só neste navegador. Faça backups com frequência. Para placar online compartilhado, configure o Supabase em <code>config.js</code> (veja o README).</p></div>`}
         <div class="card"><h3 style="margin-top:0">Backup</h3>
           <p class="muted" style="font-size:14px">${plural(state.records.length, 'torneio', 'torneios')} · ${plural(players.length, 'jogador', 'jogadores')}</p>
@@ -694,7 +721,26 @@
   }
   function bindConfig() {
     const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, (e) => guard(() => fn(e))); };
-    on('#loginForm', 'submit', async (e) => { e.preventDefault(); await S.signIn($('#lEmail').value, $('#lPass').value); toast('Bem-vindo!'); render(); });
+    on('#loginForm', 'submit', async (e) => { e.preventDefault(); await S.signIn($('#lEmail').value, $('#lPass').value); toast(`Bem-vindo, ${S.displayName()}!`); render(); });
+    on('#signupForm', 'submit', async (e) => {
+      e.preventDefault();
+      const r = await S.signUp(E.norm($('#sName').value), $('#sEmail').value.trim(), $('#sPass').value);
+      if (r === 'confirm') { toast('Conta criada! Confirme pelo link enviado ao seu e-mail e depois entre.'); accTab = 'login'; }
+      else toast('Conta criada! Você já pode lançar o placar.');
+      render();
+    });
+    $$('[data-acc]').forEach((b) => b.addEventListener('click', () => { accTab = b.dataset.acc; render(); }));
+    if ($('#usersCard')) guard(async () => {
+      const list = await S.listProfiles();
+      const card = $('#usersCard'); if (!card) return;
+      card.innerHTML = `<h3 style="margin-top:0">Marcadores cadastrados (${list.length})</h3>
+        ${list.length ? `<ul class="plist">${list.map((u) => `<li><span class="who">${pball(u.name || u.email, 'sm')}<span>${h(u.name || '—')}<br><small class="muted">${h(u.email)} · desde ${fmtDate((u.created_at || '').slice(0, 10))}</small></span></span>
+          ${u.user_id === S.user().id ? '<span class="tag gold">você</span>' : `<button class="btn btn-sm ${u.blocked ? '' : 'btn-danger'}" data-block="${h(u.user_id)}" data-v="${u.blocked ? '0' : '1'}">${u.blocked ? 'Desbloquear' : 'Bloquear'}</button>`}</li>`).join('')}</ul>` : '<div class="empty">Ninguém se cadastrou ainda.</div>'}
+        <p class="legend">Contas novas já entram como marcador. Bloqueie quem não deve lançar placar.</p>`;
+      $$('[data-block]', card).forEach((b) => b.addEventListener('click', () => guard(async () => {
+        await S.setBlocked(b.dataset.block, b.dataset.v === '1'); toast(b.dataset.v === '1' ? 'Marcador bloqueado' : 'Marcador desbloqueado'); render();
+      })));
+    });
     on('#logout', 'click', async () => { await S.signOut(); render(); });
     on('#exp', 'click', async () => {
       const blob = new Blob([JSON.stringify(await S.exportAll(), null, 2)], { type: 'application/json' });
@@ -750,6 +796,8 @@
     view.innerHTML = v(params);
     if (bind) bind(params);
     $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.route === path));
+    const acc = $('#navAcc');
+    if (acc) acc.textContent = S.mode !== 'supabase' ? '⚙' : S.user() ? `👤 ${S.displayName().split(' ')[0]}` : 'Entrar';
     if (lastPath !== path) window.scrollTo(0, 0);
     lastPath = path;
   }
@@ -777,7 +825,7 @@
 
     // Placar ao vivo (Supabase realtime)
     S.onCurrentChange(async (data) => {
-      if (S.canWrite() && JSON.stringify(data) === JSON.stringify(state.current)) return;
+      if (S.canScore() && JSON.stringify(data) === JSON.stringify(state.current)) return;
       const finishedNow = data && data.status === 'finished' && !(state.current && state.current.status === 'finished');
       state.current = data;
       if (finishedNow) state.records = await S.listTournaments();
