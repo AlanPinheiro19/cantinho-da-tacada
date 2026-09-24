@@ -35,6 +35,12 @@ window.CTD_CONFIG = {
     ['Denise Jans', 'https://unsplash.com/@dmjdenise'],
   ],
 
+  // ---- Desenvolvedor (aparece no rodapé) ----
+  developer: {
+    name: 'Alan Pinheiro',
+    email: 'alanpinhe@gmail.com',
+  },
+
   // ---- Contato (opcional, aparece no rodapé) ----
   contact: {
     whatsapp: '',   // ex.: '5511999999999'
