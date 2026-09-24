@@ -7,7 +7,7 @@
   const E = window.CTD_ENGINE;
 
   // ---------------- Local ----------------
-  const LK = { t: 'ctd.tournaments', c: 'ctd.current' };
+  const LK = { t: 'ctd.tournaments', c: 'ctd.current', s: 'ctd.schedules' };
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
   const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.error('Não foi possível salvar no navegador', e); } };
 
@@ -30,6 +30,9 @@
     async setCurrent(t) { lsSet(LK.c, t); },
     onCurrentChange() {},
     onAuth() {},
+    async listSchedules() { return lsGet(LK.s, []); },
+    async saveSchedule(sc) { lsSet(LK.s, lsGet(LK.s, []).filter((x) => x.id !== sc.id).concat(sc)); },
+    async deleteSchedule(id) { lsSet(LK.s, lsGet(LK.s, []).filter((x) => x.id !== id)); },
   };
 
   // ---------------- Supabase ----------------
@@ -115,6 +118,15 @@
         const q = admin ? sb.from('current_tournament').upsert({ id: 1, data: t }) : sb.from('current_tournament').update({ data: t }).eq('id', 1);
         const { error } = await q; fail(error);
       },
+      async listSchedules() {
+        const { data, error } = await sb.from('scheduled_tournaments').select('data').order('starts_at');
+        if (error && /does not exist|schema cache/i.test(error.message)) return []; // tabela ainda não criada
+        fail(error); return data.map((r) => r.data);
+      },
+      async saveSchedule(sc) {
+        const { error } = await sb.from('scheduled_tournaments').upsert({ id: sc.id, starts_at: sc.startsAt, status: sc.status || 'scheduled', data: sc }); fail(error);
+      },
+      async deleteSchedule(id) { const { error } = await sb.from('scheduled_tournaments').delete().eq('id', id); fail(error); },
       onCurrentChange(cb) {
         sb.channel('current').on('postgres_changes', { event: '*', schema: 'public', table: 'current_tournament' },
           (p) => cb(p.new ? p.new.data : null)).subscribe();

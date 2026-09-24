@@ -24,7 +24,7 @@
 
   // ---------------- Torneio em andamento ----------------
 
-  function newTournament({ name, date, lives, players, ranked = true }) {
+  function newTournament({ name, date, lives, players, ranked = true, scheduledId = null }) {
     const seen = new Set();
     const participants = [];
     for (const p of players || []) {
@@ -39,6 +39,7 @@
       date: date || new Date().toISOString().slice(0, 10),
       lives: Math.max(1, parseInt(lives, 10) || 3),
       ranked: ranked !== false, // vale para o ranking da temporada?
+      scheduledId: scheduledId || undefined, // torneio agendado de origem
       participants,
       rounds: [],
       status: 'running', // running | finished

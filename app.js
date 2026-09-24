@@ -11,11 +11,14 @@
   const view = $('#view');
 
   // ---------- estado em memória ----------
-  const state = { records: [], current: null, undo: [], loaded: false };
+  const state = { records: [], current: null, undo: [], loaded: false, schedules: [] };
 
   // ---------- utilidades ----------
   const h = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtDate = (d) => (d ? d.split('-').reverse().join('/') : '—');
+  const todayLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  // Um torneio só está "ao vivo" se estiver rodando e a data dele já chegou
+  const isLive = (t) => !!t && t.status === 'running' && !((t.date || '') > todayLocal());
   const MONTHS = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   const fmtMonth = (ym) => { const [y, m] = ym.split('-'); return `${MONTHS[+m - 1]} de ${y}`; };
   const pct = (x) => `${Math.round(x)}%`;
@@ -88,9 +91,10 @@
 
   // ---------- persistência ----------
   async function loadAll() {
-    const [records, current] = await Promise.all([S.listTournaments(), S.getCurrent()]);
+    const [records, current, schedules] = await Promise.all([S.listTournaments(), S.getCurrent(), S.listSchedules()]);
     state.records = records || [];
     state.current = current || null;
+    state.schedules = schedules || [];
     state.loaded = true;
   }
 
@@ -167,7 +171,8 @@
     const duels = players.reduce((a, s) => a + s.wins, 0);
     const cur = state.current;
 
-    const live = cur && cur.status === 'running';
+    const live = isLive(cur);
+    const nextS = upcoming()[0];
     const top = hall[0];
     return `
       <section class="hero" style="--img:url('${h(img('hero'))}')">
@@ -184,6 +189,11 @@
               <p>${plural(E.alive(cur).length, 'jogador ainda na mesa', 'jogadores ainda na mesa')}</p>
               <div class="hero__balls">${E.alive(cur).slice(0, 8).map((p) => `<span title="${h(p.name)}">${pball(p.name)}</span>`).join('')}</div>
               <a class="btn btn-primary btn-block" href="#/sorteio">Ver os duelos</a>`
+            : nextS ? `<div class="live-tag gold">📅 Próximo torneio</div>
+              <h2>${h(nextS.name)}</h2>
+              <p>${fmtWhen(nextS.startsAt)}${nextS.place ? ' · ' + h(nextS.place) : ''}</p>
+              <div class="sched__cd big ${isOpen(nextS) ? 'on' : ''}" data-until="${h(nextS.startsAt)}">${countdown(nextS.startsAt)}</div>
+              <a class="btn btn-ghost btn-block" href="#/sorteio">Ver agenda</a>`
             : top ? `<div class="live-tag gold">Maior campeão</div>
               <div class="hero__champ">${pball(top.name, 'lg')}<div><h2>${h(top.name)}</h2><p>${plural(top.titles, 'título', 'títulos')} · ${plural(top.vices, 'vice', 'vices')}</p></div></div>
               <a class="btn btn-ghost btn-block" href="#/hall">Hall da Fama</a>`
@@ -198,6 +208,11 @@
         <div><b>${duels}</b><span>duelos disputados</span></div>
         <div><b>${recs.filter((t) => t.undefeated).length}</b><span>títulos invictos</span></div>
       </section>
+
+      ${upcoming().length ? `<section class="section">
+        <div class="sec-head"><div class="eyebrow">Agenda</div><h2>Próximos torneios</h2><div class="cue" aria-hidden="true"></div></div>
+        ${upcoming().slice(0, 3).map((x) => scheduleCard(x)).join('')}
+      </section>` : ''}
 
       <section class="section">
         <div class="sec-head"><div class="eyebrow">Hall da Fama</div><h2>Maiores campeões</h2><div class="cue" aria-hidden="true"></div></div>
@@ -214,6 +229,103 @@
       </section>`;
   }
 
+  // ---------- Agenda de torneios ----------
+  const upcoming = () => state.schedules.filter((x) => (x.status || 'scheduled') === 'scheduled')
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const isOpen = (sc) => Date.now() >= new Date(sc.startsAt).getTime();
+  const WD = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  function fmtWhen(iso) {
+    const d = new Date(iso);
+    return `${WD[d.getDay()]}, ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} às ${String(d.getHours()).padStart(2, '0')}h${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  function countdown(iso) {
+    let ms = new Date(iso).getTime() - Date.now();
+    if (ms <= 0) return 'liberado para começar';
+    const m = Math.ceil(ms / 60000), d = Math.floor(m / 1440), hh = Math.floor((m % 1440) / 60), mm = m % 60;
+    return 'começa em ' + (d ? `${d}d ${hh}h` : hh ? `${hh}h ${String(mm).padStart(2, '0')}min` : `${mm} min`);
+  }
+  const localInput = (iso) => { const d = iso ? new Date(iso) : new Date(Date.now() + 86400000); d.setSeconds(0, 0); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  const ymdLocal = (iso) => localInput(iso).slice(0, 10);
+
+  function scheduleCard(sc, { admin = false } = {}) {
+    const open = isOpen(sc);
+    return `<article class="card sched ${open ? 'sched--open' : ''}">
+      <div class="sched__date"><b>${String(new Date(sc.startsAt).getDate()).padStart(2, '0')}</b><span>${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][new Date(sc.startsAt).getMonth()]}</span></div>
+      <div class="sched__info"><h3>${h(sc.name)}</h3>
+        <div class="muted">${fmtWhen(sc.startsAt)}${sc.place ? ' · ' + h(sc.place) : ''}</div>
+        <div class="btn-row" style="gap:6px;margin-top:6px">${sc.ranked !== false ? '<span class="tag gold">🏆 RANKING</span>' : '<span class="tag">🤝 AMISTOSO</span>'}<span class="tag">${sc.lives} vidas</span>${sc.players && sc.players.length ? `<span class="tag">${plural(sc.players.length, 'confirmado', 'confirmados')}</span>` : ''}</div>
+        ${sc.notes ? `<p class="muted" style="margin:6px 0 0;font-size:14px">${h(sc.notes)}</p>` : ''}</div>
+      <div class="sched__act"><div class="sched__cd ${open ? 'on' : ''}" data-until="${h(sc.startsAt)}">${countdown(sc.startsAt)}</div>
+        ${admin ? `<div class="btn-row" style="justify-content:flex-end">
+          <button class="btn btn-sm btn-primary" data-sstart="${h(sc.id)}" ${open && !state.current ? '' : 'disabled'} title="${!open ? 'Só pode começar na data e hora agendadas' : state.current ? 'Finalize o torneio em andamento antes' : 'Iniciar agora'}">▶ Iniciar</button>
+          <button class="btn btn-sm" data-sedit="${h(sc.id)}">Editar</button>
+          <button class="btn btn-sm btn-danger" data-sdel="${h(sc.id)}" title="Cancelar agendamento">✕</button></div>` : ''}
+      </div></article>`;
+  }
+  function scheduleList({ admin = false } = {}) {
+    const list = upcoming();
+    return `<section class="section" style="margin-top:0;margin-bottom:28px">
+      <div class="section-title"><span>📅 Agenda de torneios</span>${admin ? '<button class="btn btn-sm btn-primary" id="sNew">＋ Agendar torneio</button>' : ''}</div>
+      ${list.length ? list.map((x) => scheduleCard(x, { admin })).join('') : `<div class="empty">Nenhum torneio agendado.${admin ? ' Use “Agendar torneio” para marcar o próximo do ranking.' : ''}</div>`}
+    </section>`;
+  }
+  function scheduleForm(sc, prefill) {
+    const e = sc || { name: '', startsAt: null, lives: C.defaultLives, ranked: true, players: [], place: '', notes: '', ...(prefill || {}) };
+    const known = E.allPlayers(state.records);
+    const o = overlay(`<form class="card modal" id="sForm" style="max-width:560px">
+      <h2>${sc ? 'Editar agendamento' : 'Agendar torneio'}</h2>
+      <div style="display:grid;gap:12px">
+        <div class="field"><label for="sfName">Nome</label><input class="input" id="sfName" required maxlength="60" placeholder="Ex.: Etapa 5 do Ranking" value="${h(e.name)}"></div>
+        <div class="form-row" style="grid-template-columns:1fr 110px">
+          <div class="field"><label for="sfWhen">Data e hora de início</label><input class="input" id="sfWhen" type="datetime-local" required value="${localInput(e.startsAt)}"></div>
+          <div class="field"><label for="sfLives">Vidas</label><input class="input" id="sfLives" type="number" min="1" max="9" value="${h(e.lives)}"></div></div>
+        <div class="field"><label for="sfPlace">Local (opcional)</label><input class="input" id="sfPlace" maxlength="60" value="${h(e.place || '')}"></div>
+        <label class="switch"><input type="checkbox" id="sfRanked" ${e.ranked !== false ? 'checked' : ''}><span class="switch__ui" aria-hidden="true"></span><span><b>Vale para o Ranking da temporada</b></span></label>
+        <div class="field"><label for="sfPlayers">Jogadores confirmados (opcional, separados por vírgula)</label>
+          <textarea class="input" id="sfPlayers" rows="3" placeholder="Pode completar na hora de iniciar">${h((e.players || []).join(', '))}</textarea>
+          ${known.length ? `<div class="chips" style="margin-top:6px">${known.slice(0, 30).map((n) => `<button type="button" class="chip chip-add" data-sfadd="${h(n)}">＋ ${h(n)}</button>`).join('')}</div>` : ''}</div>
+        <div class="field"><label for="sfNotes">Observações (opcional)</label><input class="input" id="sfNotes" maxlength="140" value="${h(e.notes || '')}"></div>
+      </div>
+      <p class="legend">O torneio só poderá ser iniciado a partir da data e hora marcadas. A regra também é conferida pelo servidor.</p>
+      <div class="btn-row"><button class="btn btn-primary" type="submit">${sc ? 'Salvar' : 'Agendar'}</button><button class="btn" type="button" id="sfX">Voltar</button></div>
+    </form>`);
+    $('#sfX', o).onclick = closeOverlay;
+    $$('[data-sfadd]', o).forEach((b) => b.addEventListener('click', () => {
+      const ta = $('#sfPlayers', o); const cur = ta.value.split(',').map(E.norm).filter(Boolean);
+      if (!cur.includes(b.dataset.sfadd)) ta.value = cur.concat(b.dataset.sfadd).join(', ');
+      b.remove();
+    }));
+    $('#sForm', o).addEventListener('submit', (ev) => { ev.preventDefault(); guard(async () => {
+      const when = $('#sfWhen', o).value; if (!when) throw new Error('Informe data e hora.');
+      const startsAt = new Date(when).toISOString();
+      if (!sc && new Date(startsAt) < new Date(Date.now() - 60000)) throw new Error('Escolha uma data e hora no futuro.');
+      const players = [...new Set($('#sfPlayers', o).value.split(/[,;\n]/).map(E.norm).filter(Boolean))];
+      const rec = { ...(sc || {}), id: (sc && sc.id) || E.uid(), name: E.norm($('#sfName', o).value) || 'Torneio do Ranking', startsAt,
+        lives: Math.max(1, parseInt($('#sfLives', o).value, 10) || C.defaultLives), ranked: $('#sfRanked', o).checked,
+        place: E.norm($('#sfPlace', o).value), notes: E.norm($('#sfNotes', o).value), players, status: 'scheduled' };
+      await S.saveSchedule(rec);
+      state.schedules = state.schedules.filter((x) => x.id !== rec.id).concat(rec);
+      if (prefill && prefill.fromDraft) Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, scheduledId: null });
+      closeOverlay(); toast(sc ? 'Agendamento atualizado' : `Torneio agendado para ${fmtWhen(startsAt)}`); render();
+    }); });
+  }
+  function bindSchedules() {
+    const n = $('#sNew'); if (n) n.addEventListener('click', () => scheduleForm(null));
+    $$('[data-sedit]').forEach((b) => b.addEventListener('click', () => scheduleForm(state.schedules.find((x) => x.id === b.dataset.sedit))));
+    $$('[data-sdel]').forEach((b) => b.addEventListener('click', () => guard(async () => {
+      const sc = state.schedules.find((x) => x.id === b.dataset.sdel);
+      if (!(await ask(`Cancelar o agendamento "${sc.name}" (${fmtWhen(sc.startsAt)})?`, 'Cancelar agendamento'))) return;
+      await S.deleteSchedule(sc.id); state.schedules = state.schedules.filter((x) => x.id !== sc.id); toast('Agendamento cancelado'); render();
+    })));
+    $$('[data-sstart]').forEach((b) => b.addEventListener('click', () => {
+      const sc = state.schedules.find((x) => x.id === b.dataset.sstart);
+      if (!isOpen(sc)) return toast(`Este torneio só pode começar ${fmtWhen(sc.startsAt)}.`, true);
+      Object.assign(draft, { name: sc.name, date: ymdLocal(sc.startsAt), lives: sc.lives, ranked: sc.ranked !== false, players: (sc.players || []).slice(), scheduledId: sc.id });
+      render(); const f = $('#tName'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast('Confira os jogadores presentes e clique em “Sortear duelos”.');
+    }));
+  }
+
   // ---------- Sorteio / torneio ----------
   const draft = { name: '', date: '', lives: C.defaultLives, players: [], ranked: true };
 
@@ -227,6 +339,7 @@
     const can = S.canWrite();
     if (!can && S.mode === 'supabase') {
       return `${head('Sorteio', 'Nenhum torneio em andamento', 'Quando o administrador criar o torneio, os duelos aparecem aqui ao vivo.')}
+        ${scheduleList()}
         <div class="empty" style="max-width:640px;margin:0 auto">A mesa está livre no momento. Veja o <a href="#/ranking">ranking</a> ou o <a href="#/historico">histórico</a> enquanto isso.</div>
         ${S.user() ? '' : '<p style="text-align:center;margin-top:18px;font-size:14px" class="muted">Quer ajudar a lançar o placar? <a href="#/config">Entre ou crie sua conta</a></p>'}`;
     }
@@ -235,9 +348,13 @@
       .filter((n) => known.includes(n)).slice(0, 24);
     if (!draft.date) draft.date = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
+    const linked = draft.scheduledId && state.schedules.find((x) => x.id === draft.scheduledId);
+    const future = !linked && (draft.date || '') > todayLocal();
     return `${head('Sorteio', 'Novo Torneio', 'Cadastre os participantes e deixe o sorteio montar os duelos')}
       ${!can ? loginHint() : ''}
+      ${scheduleList({ admin: can })}
       <div class="card" style="max-width:760px;margin:0 auto">
+        ${linked ? `<div class="sched-link">📅 Iniciando o torneio agendado <b>${h(linked.name)}</b> (${fmtWhen(linked.startsAt)}). <button class="btn btn-sm" id="unlinkS">Desvincular</button></div>` : '<h3 class="section-title" style="font-size:18px">Começar um torneio agora</h3>'}
         <div class="form-row">
           <div class="field"><label for="tName">Nome do torneio</label><input class="input" id="tName" placeholder="Ex.: Terça Maluca" value="${h(draft.name)}" maxlength="60"></div>
           <div class="field"><label for="tDate">Data</label><input class="input" id="tDate" type="date" value="${h(draft.date)}"></div>
@@ -261,7 +378,9 @@
         ${freq.length ? `<div style="margin-top:16px"><div class="muted" style="font-size:12px;margin-bottom:8px">Jogadores frequentes — toque para adicionar</div>
           <div class="chips">${freq.map((n) => `<button class="chip chip-add" data-add="${h(n)}">＋ ${h(n)}</button>`).join('')}</div></div>` : ''}
         <div style="margin-top:20px;display:grid;gap:10px">
-          <button class="btn btn-primary btn-block" id="startBtn" ${draft.players.length < 2 || !can ? 'disabled' : ''}>🎱 Sortear duelos</button>
+          ${future ? `<div class="sched-link">📅 A data escolhida (${fmtDate(draft.date)}) é futura. Torneios futuros não começam agora: eles vão para a <b>agenda</b> e só podem ser iniciados no dia e horário marcados.</div>
+          <button class="btn btn-primary btn-block" id="toSchedule" ${!can ? 'disabled' : ''}>📅 Agendar para ${fmtDate(draft.date)}</button>`
+          : `<button class="btn btn-primary btn-block" id="startBtn" ${draft.players.length < 2 || !can ? 'disabled' : ''}>🎱 Sortear duelos agora</button>`}
           ${draft.players.length ? '<button class="btn btn-block btn-danger" id="clearDraft">Limpar participantes</button>' : ''}
         </div>
         <p class="legend">Regra: cada jogador tem <b>${h(draft.lives)} vidas</b>. A cada rodada os vivos são sorteados em duelos (com número ímpar, um jogador descansa — “bye”). Quem perde todas as vidas está fora. O último que sobrar é o campeão; o último eliminado é o vice. Campeão sem nenhuma derrota = <b>invicto</b>.</p>
@@ -269,8 +388,13 @@
   }
 
   function bindSetup() {
+    bindSchedules();
+    const ul = $('#unlinkS'); if (ul) ul.addEventListener('click', () => { draft.scheduledId = null; render(); });
     const sync = () => { draft.name = $('#tName').value; draft.date = $('#tDate').value; draft.lives = $('#tLives').value; draft.ranked = $('#tRanked').checked; };
     ['#tName', '#tDate', '#tLives', '#tRanked'].forEach((s) => $(s).addEventListener('input', sync));
+    $('#tDate').addEventListener('change', () => { sync(); render(); });
+    const ts = $('#toSchedule');
+    if (ts) ts.addEventListener('click', () => { sync(); scheduleForm(null, { name: draft.name, startsAt: new Date(draft.date + 'T20:00').toISOString(), lives: draft.lives, ranked: draft.ranked, players: draft.players.slice(), fromDraft: true }); });
     $('#tLives').addEventListener('change', () => render());
     const add = (name) => {
       const n = E.norm(name).slice(0, 40); if (!n) return;
@@ -288,16 +412,20 @@
     $$('[data-rm]').forEach((b) => b.addEventListener('click', () => { sync(); draft.players.splice(+b.dataset.rm, 1); render(); }));
     $$('[data-add]').forEach((b) => b.addEventListener('click', () => { sync(); add(b.dataset.add); render(); }));
     const cl = $('#clearDraft'); if (cl) cl.addEventListener('click', () => { draft.players = []; render(); });
-    $('#startBtn').addEventListener('click', () => guard(async () => {
+    const sb = $('#startBtn'); if (sb) sb.addEventListener('click', () => guard(async () => {
       sync();
       if (!S.canWrite()) throw new Error('Entre como administrador.');
       if (!draft.name.trim()) { $('#tName').focus(); throw new Error('Dê um nome ao torneio.'); }
-      const t = E.newTournament({ name: draft.name, date: draft.date, lives: draft.lives, players: draft.players, ranked: draft.ranked });
+      const sc = draft.scheduledId && state.schedules.find((x) => x.id === draft.scheduledId);
+      if (sc && !isOpen(sc)) throw new Error(`Este torneio só pode começar ${fmtWhen(sc.startsAt)}.`);
+      if (!sc && (draft.date || '') > todayLocal()) throw new Error('Data futura: use "Agendar" — o torneio só pode começar no dia marcado.');
+      const t = E.newTournament({ name: draft.name, date: draft.date, lives: draft.lives, players: draft.players, ranked: draft.ranked, scheduledId: sc ? sc.id : null });
       if (t.participants.length < 2) throw new Error('Adicione ao menos 2 jogadores.');
       E.drawRound(t);
       state.current = t; state.undo = [];
       await saveCurrent();
-      Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true });
+      if (sc) { const done = { ...sc, status: 'started', tournamentId: t.id }; await S.saveSchedule(done); state.schedules = state.schedules.map((x) => (x.id === sc.id ? done : x)); }
+      Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, scheduledId: null });
       await drawAnimation(t);
       render();
     }));
@@ -833,6 +961,17 @@
       if (p === 'sorteio' || p === '') render();
     });
     S.onAuth(() => render());
+
+    // Contagem regressiva da agenda (atualiza a cada 20 s; libera o botão na hora certa)
+    setInterval(() => {
+      let flipped = false;
+      $$('[data-until]').forEach((el) => {
+        const open = Date.now() >= new Date(el.dataset.until).getTime();
+        if (open !== el.classList.contains('on')) flipped = true;
+        el.textContent = countdown(el.dataset.until);
+      });
+      if (flipped && !$('#overlay').innerHTML) render();
+    }, 20000);
   }
 
   start();

@@ -357,3 +357,18 @@ a.seg__btn { display: inline-flex; align-items: center; text-decoration: none; }
 .mx-win { background: rgba(31,154,106,.28); color: #bff3d8; }
 .mx-lose { background: rgba(226,88,78,.2); color: #ffc9c4; }
 .mx-tie { background: rgba(216,170,79,.16); color: var(--brass-lit); }
+
+/* ---------- Agenda ---------- */
+.sched { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; margin-bottom: 12px; }
+.sched--open { border-color: rgba(31,154,106,.6); box-shadow: 0 0 0 1px rgba(31,154,106,.3) inset; }
+.sched__date { width: 62px; text-align: center; border-radius: 10px; padding: 8px 4px; background: var(--felt-tex), linear-gradient(180deg, var(--felt-lit), var(--felt)); border: 3px solid var(--wood); }
+.sched__date b { display: block; font-family: var(--cond); font-size: 28px; line-height: 1; color: #fff; }
+.sched__date span { font-family: var(--cond); font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-size: 12px; color: rgba(255,255,255,.85); }
+.sched__info h3 { margin: 0 0 2px; font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; font-size: 19px; }
+.sched__act { display: grid; gap: 8px; justify-items: end; }
+.sched__cd { font-family: var(--cond); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 14px; color: var(--brass-lit); }
+.sched__cd.on { color: #7fe0b0; }
+.sched__cd.big { font-size: 20px; }
+.sched-link { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 14px; border-radius: 10px; background: rgba(216,170,79,.12); border: 1px solid rgba(216,170,79,.45); }
+textarea.input { resize: vertical; font: inherit; }
+@media (max-width: 640px) { .sched { grid-template-columns: auto 1fr; } .sched__act { grid-column: 1 / -1; justify-items: stretch; } .sched__act .btn-row { justify-content: flex-start !important; } }

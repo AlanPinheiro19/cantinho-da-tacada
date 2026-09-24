@@ -170,3 +170,44 @@ end $$;
 drop trigger if exists guard_score on public.current_tournament;
 create trigger guard_score before update on public.current_tournament
   for each row execute function public.guard_score();
+-- ============================================================
+--  Agenda de torneios (leitura pública, escrita só do administrador)
+--  + trava: torneio agendado só começa na data/hora marcada
+-- ============================================================
+create table if not exists public.scheduled_tournaments (
+  id         uuid primary key,
+  starts_at  timestamptz not null,
+  status     text not null default 'scheduled',
+  data       jsonb not null,
+  created_at timestamptz not null default now()
+);
+alter table public.scheduled_tournaments enable row level security;
+drop policy if exists "leitura publica" on public.scheduled_tournaments;
+drop policy if exists "escrita admin" on public.scheduled_tournaments;
+create policy "leitura publica" on public.scheduled_tournaments
+  for select to anon, authenticated using (true);
+create policy "escrita admin" on public.scheduled_tournaments
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+create or replace function public.guard_schedule() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare sid text := new.data->>'scheduledId'; st timestamptz;
+begin
+  if new.data is null then return new; end if;
+  -- só verifica quando um torneio NOVO começa (não a cada lançamento de placar)
+  if tg_op = 'UPDATE' and (old.data->>'id') is not distinct from (new.data->>'id') then return new; end if;
+  if auth.uid() is not null and (new.data->>'status') = 'running'
+     and (new.data->>'date') > to_char(now() at time zone 'America/Sao_Paulo', 'YYYY-MM-DD') then
+    raise exception 'Data futura: agende o torneio. Ele só pode começar no dia marcado.';
+  end if;
+  if sid is null then return new; end if;
+  select starts_at into st from public.scheduled_tournaments where id::text = sid;
+  if st is null then raise exception 'Agendamento não encontrado'; end if;
+  if now() < st then
+    raise exception 'Este torneio só pode começar em %', to_char(st at time zone 'America/Sao_Paulo', 'DD/MM/YYYY "às" HH24:MI');
+  end if;
+  return new;
+end $$;
+drop trigger if exists guard_schedule on public.current_tournament;
+create trigger guard_schedule before insert or update on public.current_tournament
+  for each row execute function public.guard_schedule();
