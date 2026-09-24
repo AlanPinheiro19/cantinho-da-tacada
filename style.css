@@ -383,3 +383,5 @@ textarea.input { resize: vertical; font: inherit; }
 .flag[data-flag="suicidio"].on { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
 .flag:disabled { cursor: default; }
 .fl { font-size: 13px; margin-right: 2px; }
+.footer__dev { width: 100%; font-size: 13.5px; color: rgba(241,237,227,.8); border-top: 1px solid rgba(241,237,227,.12); padding-top: 12px; }
+.footer__dev b { color: var(--text); font-weight: 600; }
