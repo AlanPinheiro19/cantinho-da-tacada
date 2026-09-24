@@ -950,6 +950,8 @@
       c.whatsapp && `<a href="https://wa.me/${encodeURIComponent(c.whatsapp)}" target="_blank" rel="noopener">WhatsApp</a>`,
       c.instagram && `<a href="https://instagram.com/${encodeURIComponent(c.instagram)}" target="_blank" rel="noopener">Instagram</a>`,
     ].filter(Boolean).join('');
+    const dev = C.developer || {};
+    if (dev.name || dev.email) $('#footDev').innerHTML = `${dev.name ? `Desenvolvido por: <b>${h(dev.name)}</b>` : ''}${dev.name && dev.email ? ' · ' : ''}${dev.email ? `Contato: <a href="mailto:${h(dev.email)}">${h(dev.email)}</a>` : ''}`;
     if (C.photoCredits) $('#footCredits').innerHTML = 'Fotos: ' + C.photoCredits.map(([n, u]) => `<a href="${h(u)}" target="_blank" rel="noopener">${h(n)}</a>`).join(', ') + ' / Unsplash';
     $('#navToggle').addEventListener('click', () => { const n = $('#nav'); n.classList.toggle('open'); $('#navToggle').setAttribute('aria-expanded', n.classList.contains('open')); });
     $('#nav').addEventListener('click', (e) => { if (e.target.tagName === 'A') $('#nav').classList.remove('open'); });
