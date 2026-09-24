@@ -194,7 +194,7 @@
               <h2>${h(nextS.name)}</h2>
               <p>${fmtWhen(nextS.startsAt)}${nextS.place ? ' · ' + h(nextS.place) : ''}</p>
               <div class="sched__cd big ${isOpen(nextS) ? 'on' : ''}" data-until="${h(nextS.startsAt)}">${countdown(nextS.startsAt)}</div>
-              <a class="btn btn-ghost btn-block" href="#/sorteio">Ver agenda</a>`
+              <a class="btn btn-ghost btn-block" href="#/agenda">Ver agenda</a>`
             : top ? `<div class="live-tag gold">Maior campeão</div>
               <div class="hero__champ">${pball(top.name, 'lg')}<div><h2>${h(top.name)}</h2><p>${plural(top.titles, 'título', 'títulos')} · ${plural(top.vices, 'vice', 'vices')}</p></div></div>
               <a class="btn btn-ghost btn-block" href="#/hall">Hall da Fama</a>`
@@ -231,7 +231,9 @@
   }
 
   // ---------- Agenda de torneios ----------
-  const upcoming = () => state.schedules.filter((x) => (x.status || 'scheduled') === 'scheduled')
+  // agendados e não iniciados; para visitantes, some 24h depois do horário se não foi iniciado
+  const upcoming = () => state.schedules.filter((x) => (x.status || 'scheduled') === 'scheduled'
+      && (S.canWrite() || Date.now() - new Date(x.startsAt).getTime() < 86400000))
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   const isOpen = (sc) => Date.now() >= new Date(sc.startsAt).getTime();
   const WD = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
@@ -330,10 +332,29 @@
   // ---------- Sorteio / torneio ----------
   const draft = { name: '', date: '', lives: C.defaultLives, players: [], ranked: true };
 
+  // Torneio "atual" só é exibido se estiver em andamento, ou se terminou hoje
+  // e ainda existe no histórico. Terminado antes / excluído => mesa livre.
+  function activeCurrent() {
+    const c = state.current;
+    if (!c) return null;
+    if (c.status === 'running') return c;
+    const inHist = state.records.some((r) => r.id === c.id);
+    return inHist && (c.date || '') >= todayLocal() ? c : null;
+  }
   function viewSorteio() {
-    const cur = state.current;
+    const cur = activeCurrent();
     if (!cur) return viewSetup();
     return viewRunning(cur);
+  }
+
+  // Página própria da agenda (link "Ver agenda")
+  function viewAgenda() {
+    const can = S.canWrite();
+    const past = state.schedules.filter((x) => x.status === 'started').sort((a, b) => b.startsAt.localeCompare(a.startsAt)).slice(0, 5);
+    return `${head('Agenda', 'Próximos torneios', 'Datas e horários dos torneios agendados do clube')}
+      ${scheduleList({ admin: can })}
+      ${past.length ? `<section class="section" style="margin-top:8px"><div class="section-title"><span>Já iniciados</span></div>
+        ${past.map((x) => `<div class="card" style="margin-bottom:8px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b>${h(x.name)}</b> <span class="muted">· ${fmtWhen(x.startsAt)}</span></span><span class="tag green">iniciado</span></div>`).join('')}</section>` : ''}`;
   }
 
   function viewSetup() {
@@ -758,7 +779,9 @@
     $$('[data-del]').forEach((b) => b.addEventListener('click', () => guard(async () => {
       const t = state.records.find((r) => r.id === b.dataset.del);
       if (!(await ask(`Excluir o torneio "${t.name}" (${fmtDate(t.date)})? Isso altera ranking e estatísticas.`, 'Excluir'))) return;
-      await S.deleteTournament(t.id); state.records = state.records.filter((r) => r.id !== t.id); toast('Torneio excluído'); render();
+      await S.deleteTournament(t.id); state.records = state.records.filter((r) => r.id !== t.id);
+      if (state.current && state.current.id === t.id && state.current.status !== 'running') { state.current = null; state.undo = []; await saveCurrent(); }
+      toast('Torneio excluído'); render();
     })));
   }
 
@@ -910,7 +933,8 @@
   // ============================================================
   const routes = {
     '': [viewHome],
-    sorteio: [viewSorteio, () => (state.current ? bindRunning() : bindSetup())],
+    sorteio: [viewSorteio, () => (activeCurrent() ? bindRunning() : bindSetup())],
+    agenda: [viewAgenda, bindSchedules],
     ranking: [viewRanking, bindRanking],
     '1x1': [viewH2H, bindH2H],
     historico: [viewHistory, bindHistory],
@@ -959,6 +983,8 @@
 
     render();
     await guard(async () => { await S.init(); await loadAll(); });
+    // limpeza: admin remove do "torneio atual" um torneio antigo/excluído que ficou preso
+    if (state.current && !activeCurrent() && S.canWrite()) await guard(async () => { state.current = null; await saveCurrent(); });
     state.loaded = true;
     render();
 
@@ -969,7 +995,7 @@
       state.current = data;
       if (finishedNow) state.records = await S.listTournaments();
       const p = parseHash().path;
-      if (p === 'sorteio' || p === '') render();
+      if (p === 'sorteio' || p === '' || p === 'agenda') render();
     });
     S.onAuth(() => render());
 
