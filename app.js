@@ -77,15 +77,16 @@
     return `<span class="lives" title="${left} de ${lives} vidas" aria-label="${left} de ${lives} vidas">${'<i class="on"></i>'.repeat(left)}${'<i></i>'.repeat(lives - left)}</span>`;
   }
 
-  function duelMini(d, w) {
+  const flagBadges = (f) => `${f && f.gato ? '<span class="fl fl-gato" title="Gato">🐱</span>' : ''}${f && f.suicidio ? '<span class="fl fl-sui" title="Suicídio">💀</span>' : ''}`;
+  function duelMini(d, w, f) {
     const cls = (n) => (w ? (n === w ? 'w' : 'l') : '');
-    return `<span class="duel-mini"><span class="${cls(d[0])}">${w === d[0] ? '✓ ' : ''}${h(d[0])}</span><span class="vs">vs</span><span class="${cls(d[1])}">${w === d[1] ? '✓ ' : ''}${h(d[1])}</span></span>`;
+    return `<span class="duel-mini">${flagBadges(f)}<span class="${cls(d[0])}">${w === d[0] ? '✓ ' : ''}${h(d[0])}</span><span class="vs">vs</span><span class="${cls(d[1])}">${w === d[1] ? '✓ ' : ''}${h(d[1])}</span></span>`;
   }
 
   function roundsHtml(rounds) {
     return rounds.map((r, i) => `
       <div class="round-label">RODADA ${i + 1}</div>
-      <div>${r.duels.map((d, j) => duelMini(d, r.winners[j])).join('')}
+      <div>${r.duels.map((d, j) => duelMini(d, r.winners[j], r.flags && r.flags[j])).join('')}
       ${r.byes.map((b) => `<span class="duel-mini"><span class="vs">bye ·</span> <b>${h(b)}</b> <span class="vs">avança</span></span>`).join('')}</div>`).join('');
   }
 
@@ -454,7 +455,10 @@
         ${r.duels.map((d, i) => {
           const w = r.winners[i];
           const btn = (n) => `<button class="pick ${w ? (w === n ? 'win' : 'lose') : ''}" data-duel="${i}" data-name="${h(n)}" ${can ? '' : 'disabled'}>${pball(n, 'sm')}<span class="nm">${h(n)}</span></button>`;
-          return `<div class="duel ${state.justDrawn ? 'anim' : ''}" style="animation-delay:${i * 60}ms"><span class="n">DUELO ${i + 1}</span>${btn(d[0])}<span class="vs">${ball(8, 'xs')}</span>${btn(d[1])}</div>`;
+          const f = E.flagOf(r, i);
+          const fb = (k, ico, label) => `<button class="flag ${f[k] ? 'on' : ''}" data-flag="${k}" data-duel="${i}" aria-pressed="${!!f[k]}" ${can ? '' : 'disabled'} title="${label}">${ico} ${label}</button>`;
+          const flags = (can || f.gato || f.suicidio) ? `<div class="flags">${can ? fb('gato', '🐱', 'Gato') + fb('suicidio', '💀', 'Suicídio') : flagBadges(f)}</div>` : '';
+          return `<div class="duel ${state.justDrawn ? 'anim' : ''}" style="animation-delay:${i * 60}ms"><span class="n">DUELO ${i + 1}</span>${btn(d[0])}<span class="vs">${ball(8, 'xs')}</span>${btn(d[1])}${flags}</div>`;
         }).join('')}
         ${r.byes.map((b) => `<div class="bye">😴 <b>${h(b)}</b> descansa nesta rodada (bye)</div>`).join('')}
         ${can ? `<button class="btn btn-primary btn-block" id="closeRound" style="margin-top:14px" ${E.canCloseRound(t) ? '' : 'disabled'}>Confirmar resultados da rodada ${t.rounds.length}</button>` : ''}
@@ -496,6 +500,9 @@
 
   function bindRunning() {
     const t = state.current;
+    $$('.flag[data-flag]').forEach((b) => b.addEventListener('click', () => guard(async () => {
+      await mutate((x) => E.toggleFlag(x, +b.dataset.duel, b.dataset.flag)); render();
+    })));
     $$('.pick[data-duel]').forEach((b) => b.addEventListener('click', () => guard(async () => {
       await mutate((x) => E.setWinner(x, +b.dataset.duel, b.dataset.name)); render();
     })));
@@ -604,13 +611,13 @@
     const k = rankSort.key;
     if (k !== 'points') rows = rows.slice().sort((a, b) => (typeof a[k] === 'string' ? a[k].localeCompare(b[k]) : a[k] - b[k]) * rankSort.dir || a.name.localeCompare(b.name));
     else if (rankSort.dir === 1) rows = rows.slice().reverse();
-    const cols = [['pos', '#'], ['name', 'Nome'], ['titles', '🏆 Títulos'], ['vices', '🥈 Vices'], ['undefeated', '⭐ Invictos'], ['participations', '🎱 Torneios'], ['wins', '✅ Vitórias'], ['losses', '❌ Derrotas'], ['winPct', '📊 % Vitória'], ['points', '🏅 Pontos']];
+    const cols = [['pos', '#'], ['name', 'Nome'], ['titles', '🏆 Títulos'], ['vices', '🥈 Vices'], ['undefeated', '⭐ Invictos'], ['participations', '🎱 Torneios'], ['wins', '✅ Vitórias'], ['losses', '❌ Derrotas'], ['winPct', '📊 % Vitória'], ['gatos', '🐱 Gatos'], ['suicidios', '💀 Suicídios'], ['points', '🏅 Pontos']];
 
     return `${head('Ranking', flt.ranking.type === 'ranked' && flt.ranking.season !== 'all' ? `Ranking da Temporada ${flt.ranking.season}` : 'Estatísticas dos Jogadores', `${filterLabel('ranking')} · ${plural(recs.length, 'torneio', 'torneios')}`)}
       ${filterBar('ranking')}
       ${rows.length ? `<div class="table-wrap"><table><thead><tr>${cols.map(([c, l]) => `<th data-sort="${c}" class="${c === 'name' ? 'name' : ''} ${rankSort.key === c ? 'sorted' : ''}">${l}${rankSort.key === c ? (rankSort.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('')}</tr></thead>
         <tbody>${rows.map((s) => { const p = pos.get(s.name); return `<tr class="rank-${p}"><td>${p <= 3 ? ball(p, 'xs') : p}</td><td class="name"><a class="who" href="#/1x1?a=${encodeURIComponent(s.name)}">${pball(s.name, 'sm')}${h(s.name)}</a></td><td>${s.titles}</td><td>${s.vices}</td><td>${s.undefeated}</td><td>${s.participations}</td><td>${s.wins}</td><td>${s.losses}</td>
-          <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(s.winPct)}<div class="bar"><i style="width:${s.winPct}%"></i></div></div></td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`; }).join('')}</tbody></table></div>`
+          <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(s.winPct)}<div class="bar"><i style="width:${s.winPct}%"></i></div></div></td><td title="${s.gatosSofridos} sofridos">${s.gatos}</td><td>${s.suicidios}</td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`; }).join('')}</tbody></table></div>`
         : '<div class="empty">Nenhum torneio neste filtro. Troque o filtro acima ou finalize um torneio.</div>'}
       <section class="section card"><h2 class="section-title">Como os pontos são calculados</h2>
         <div class="legend">🏆 Título = <b>${sc.title}</b> pts · ⭐ Título invicto = <b>+${sc.undefeated}</b> · 🥈 Vice = <b>${sc.vice}</b> · ✅ Vitória em duelo = <b>${sc.win}</b> ·
@@ -651,10 +658,10 @@
         </div>
         <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:14px">
           <div class="card"><h3 style="margin-top:0;font-size:15px">Comparativo geral</h3><table class="cmp"><tbody>
-            ${row('Títulos', 'titles')}${row('Invictos', 'undefeated')}${row('Vices', 'vices')}${row('Torneios', 'participations')}${row('Vitórias', 'wins')}${row('Derrotas', 'losses', undefined, false)}${row('% Vitória', 'winPct', pct)}
+            ${row('Títulos', 'titles')}${row('Invictos', 'undefeated')}${row('Vices', 'vices')}${row('Torneios', 'participations')}${row('Vitórias', 'wins')}${row('Derrotas', 'losses', undefined, false)}${row('% Vitória', 'winPct', pct)}${row('🐱 Gatos aplicados', 'gatos')}${row('🐱 Gatos sofridos', 'gatosSofridos', undefined, false)}${row('💀 Suicídios', 'suicidios', undefined, false)}
           </tbody></table></div>
           <div class="card"><h3 style="margin-top:0;font-size:15px">Histórico de duelos diretos</h3>
-            ${r.duels.length ? `<ul class="plist">${r.duels.map((d) => `<li><span><b style="color:var(--felt-2)">✓ ${h(d.winner)}</b>${d.final ? ' <span class="tag gold">final</span>' : ''}<br><small class="muted">${h(d.tournament)} · R${d.round}</small></span><span class="muted mono" style="font-size:12px">${fmtDate(d.date)}</span></li>`).join('')}</ul>`
+            ${r.duels.length ? `<ul class="plist">${r.duels.map((d) => `<li><span><b style="color:var(--felt-2)">✓ ${h(d.winner)}</b> ${flagBadges(d)}${d.final ? ' <span class="tag gold">final</span>' : ''}<br><small class="muted">${h(d.tournament)} · R${d.round}</small></span><span class="muted mono" style="font-size:12px">${fmtDate(d.date)}</span></li>`).join('')}</ul>`
               : '<div class="empty">Esses dois ainda não se enfrentaram.</div>'}</div>
         </div>`;
     } else if (a && a === b) body = '<div class="empty" style="margin-top:18px">Escolha dois jogadores diferentes.</div>';
@@ -681,9 +688,9 @@
       out = `
         <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:16px;align-items:start">
           <div class="card"><h3 class="section-title" style="font-size:18px">Consolidado entre eles</h3>
-            <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Jogador</th><th>Duelos</th><th>✅ V</th><th>❌ D</th><th>📊 %</th></tr></thead>
+            <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Jogador</th><th>Duelos</th><th>✅ V</th><th>❌ D</th><th>📊 %</th><th>🐱</th><th>💀</th></tr></thead>
             <tbody>${g.rows.map((r, i) => `<tr class="rank-${i + 1}"><td>${i < 3 && r.games ? ball(i + 1, 'xs') : i + 1}</td><td class="name"><span class="who">${pball(r.name, 'sm')}${h(r.name)}</span></td><td>${r.games}</td><td>${r.wins}</td><td>${r.losses}</td>
-              <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(r.winPct)}<div class="bar"><i style="width:${r.winPct}%"></i></div></div></td></tr>`).join('')}</tbody></table></div>
+              <td><div style="display:flex;align-items:center;gap:8px;justify-content:center">${pct(r.winPct)}<div class="bar"><i style="width:${r.winPct}%"></i></div></div></td><td>${r.gatos}</td><td>${r.suicidios}</td></tr>`).join('')}</tbody></table></div>
             <p class="legend">Conta apenas os duelos em que os dois lados estão no grupo selecionado.</p></div>
           <div class="card"><h3 class="section-title" style="font-size:18px">Cruzamento (linha venceu × coluna)</h3>
             <div class="table-wrap"><table class="matrix"><thead><tr><th class="name">Vitórias de ↓ sobre →</th>${order.map((n) => `<th title="${h(n)}">${pball(n, 'xs')}</th>`).join('')}</tr></thead>
@@ -696,7 +703,7 @@
             <p class="legend">Verde = leva vantagem · vermelho = em desvantagem · clique numa célula para ver o 1×1.</p></div>
         </div>
         <div class="card" style="margin-top:16px"><h3 class="section-title" style="font-size:18px">Duelos entre os selecionados <span class="muted mono" style="font-size:14px">${plural(g.duels.length, 'duelo', 'duelos')}</span></h3>
-          ${g.duels.length ? `<ul class="plist">${g.duels.slice(0, 60).map((d) => `<li><span><b style="color:#7fe0b0">✓ ${h(d.winner)}</b> <span class="muted">venceu</span> ${h(d.loser)}<br><small class="muted">${h(d.tournament)} · R${d.round} · ${d.ranked ? 'ranking' : 'amistoso'}</small></span><span class="muted mono" style="font-size:13px">${fmtDate(d.date)}</span></li>`).join('')}</ul>
+          ${g.duels.length ? `<ul class="plist">${g.duels.slice(0, 60).map((d) => `<li><span><b style="color:#7fe0b0">✓ ${h(d.winner)}</b> <span class="muted">venceu</span> ${h(d.loser)} ${flagBadges(d)}<br><small class="muted">${h(d.tournament)} · R${d.round} · ${d.ranked ? 'ranking' : 'amistoso'}</small></span><span class="muted mono" style="font-size:13px">${fmtDate(d.date)}</span></li>`).join('')}</ul>
             ${g.duels.length > 60 ? '<p class="legend">Mostrando os 60 mais recentes.</p>' : ''}` : '<div class="empty">Esses jogadores ainda não se enfrentaram neste filtro.</div>'}
         </div>`;
     } else out = '<div class="empty" style="margin-top:16px">Selecione pelo menos 2 jogadores acima.</div>';
@@ -781,6 +788,8 @@
       ['🏆', 'Mais títulos', top('titles'), (r) => plural(r.titles, 'título', 'títulos')],
       ['✅', 'Mais vitórias', top('wins'), (r) => plural(r.wins, 'vitória', 'vitórias')],
       ['📊', 'Melhor aproveitamento', best, (r) => `${pct(r.winPct)} em ${r.games} duelos`],
+      ['🐱', 'Rei do gato', top('gatos'), (r) => plural(r.gatos, 'gato aplicado', 'gatos aplicados')],
+      ['💀', 'Mais suicídios', top('suicidios'), (r) => plural(r.suicidios, 'suicídio', 'suicídios')],
       ['🎱', 'Mais presente', top('participations'), (r) => plural(r.participations, 'torneio', 'torneios')],
       ['🥈', 'Mais vices', top('vices'), (r) => plural(r.vices, 'vice', 'vices')],
     ];
@@ -791,8 +800,8 @@
           <span class="muted">${plural(tournaments, 'torneio', 'torneios')}</span></div>
         <div class="grid grid-3 highlights">${hl.map(([ico, label, r, fmt]) => `<div class="card"><div class="ico">${ico}</div><small>${label}</small><b>${r ? h(r.name) : '—'}</b><small>${r ? fmt(r) : ''}</small></div>`).join('')}</div>
         <section class="section"><h2 class="section-title">Power Ranking de ${fmtMonth(monthSel)}</h2>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Nome</th><th>🏆</th><th>⭐</th><th>🥈</th><th>✅ V</th><th>❌ D</th><th>📊 %</th><th>🎱</th><th>Pts</th></tr></thead>
-          <tbody>${rows.map((s, i) => `<tr class="rank-${i + 1}"><td>${i < 3 ? ball(i + 1, 'xs') : i + 1}</td><td class="name"><span class="who">${pball(s.name, 'sm')}${h(s.name)}</span></td><td>${s.titles}</td><td>${s.undefeated}</td><td>${s.vices}</td><td>${s.wins}</td><td>${s.losses}</td><td>${pct(s.winPct)}</td><td>${s.participations}</td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`).join('')}</tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th class="name">Nome</th><th>🏆</th><th>⭐</th><th>🥈</th><th>✅ V</th><th>❌ D</th><th>📊 %</th><th>🐱</th><th>💀</th><th>🎱</th><th>Pts</th></tr></thead>
+          <tbody>${rows.map((s, i) => `<tr class="rank-${i + 1}"><td>${i < 3 ? ball(i + 1, 'xs') : i + 1}</td><td class="name"><span class="who">${pball(s.name, 'sm')}${h(s.name)}</span></td><td>${s.titles}</td><td>${s.undefeated}</td><td>${s.vices}</td><td>${s.wins}</td><td>${s.losses}</td><td>${pct(s.winPct)}</td><td>${s.gatos}</td><td>${s.suicidios}</td><td>${s.participations}</td><td class="pts">${s.points.toLocaleString('pt-BR')}</td></tr>`).join('')}</tbody></table></div>
           <p class="legend">Pontuação: 🏆 Título = ${sc.title} · ⭐ Invicto = +${sc.undefeated} · 🥈 Vice = ${sc.vice} · ✅ Vitória em duelo = ${sc.win} · 🎱 Participação = ${sc.participation}. “Melhor aproveitamento” exige ao menos 5 duelos no mês.</p></section>`
         : '<div class="empty">Nenhum torneio neste filtro.</div>'}`;
   }

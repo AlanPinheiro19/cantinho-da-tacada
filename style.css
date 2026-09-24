@@ -372,3 +372,14 @@ a.seg__btn { display: inline-flex; align-items: center; text-decoration: none; }
 .sched-link { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 14px; border-radius: 10px; background: rgba(216,170,79,.12); border: 1px solid rgba(216,170,79,.45); }
 textarea.input { resize: vertical; font: inherit; }
 @media (max-width: 640px) { .sched { grid-template-columns: auto 1fr; } .sched__act { grid-column: 1 / -1; justify-items: stretch; } .sched__act .btn-row { justify-content: flex-start !important; } }
+
+/* ---------- Gato / Suicídio ---------- */
+.flags { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: center; margin-top: -2px; }
+.flag { background: rgba(4,30,20,.35); border: 1px dashed rgba(255,255,255,.3); color: rgba(255,255,255,.8); border-radius: 99px; padding: 4px 12px; cursor: pointer;
+  font-family: var(--cond); font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
+.flag:hover:not(:disabled) { border-color: var(--brass-lit); color: #fff; }
+.flag.on { border-style: solid; background: rgba(0,0,0,.45); color: #fff; }
+.flag[data-flag="gato"].on { border-color: var(--brass-lit); box-shadow: 0 0 0 1px var(--brass-lit) inset; }
+.flag[data-flag="suicidio"].on { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+.flag:disabled { cursor: default; }
+.fl { font-size: 13px; margin-right: 2px; }

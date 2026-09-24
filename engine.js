@@ -92,7 +92,7 @@
       if (score < bestScore) { best = duels; bestScore = score; }
     }
 
-    const round = { duels: best, winners: best.map(() => null), byes, closed: false };
+    const round = { duels: best, winners: best.map(() => null), flags: best.map(() => ({})), byes, closed: false };
     t.rounds.push(round);
     return round;
   }
@@ -104,6 +104,19 @@
     if (!d || !d.includes(name)) throw new Error('Jogador não está neste duelo.');
     r.winners[duelIdx] = r.winners[duelIdx] === name ? null : name; // clicar de novo desmarca
   }
+
+  // Marcações do duelo: gato (vitória aplicada pelo vencedor) e suicídio (cometido pelo perdedor).
+  // Vale para a rodada atual (aberta ou recém-fechada).
+  const FLAGS = ['gato', 'suicidio'];
+  function toggleFlag(t, duelIdx, flag) {
+    if (!FLAGS.includes(flag)) throw new Error('Marcação inválida.');
+    const r = currentRound(t);
+    if (!r || !r.duels[duelIdx]) throw new Error('Duelo não encontrado.');
+    if (!r.flags) r.flags = r.duels.map(() => ({}));
+    const f = r.flags[duelIdx] || (r.flags[duelIdx] = {});
+    if (f[flag]) delete f[flag]; else f[flag] = true;
+  }
+  const flagOf = (r, i) => (r.flags && r.flags[i]) || {};
 
   function canCloseRound(t) {
     const r = currentRound(t);
@@ -172,7 +185,7 @@
       undefeated: !!t.undefeated,
       players: t.participants.length,
       participants: t.participants.map((p) => p.name),
-      rounds: t.rounds.filter((r) => r.closed).map((r) => ({ duels: r.duels, winners: r.winners.slice(), byes: r.byes.slice() })),
+      rounds: t.rounds.filter((r) => r.closed).map((r) => ({ duels: r.duels, winners: r.winners.slice(), flags: (r.flags || r.duels.map(() => ({}))).map((f) => ({ ...(f || {}) })), byes: r.byes.slice() })),
     };
   }
 
@@ -186,7 +199,8 @@
         const ws = new Set(winners);
         winners = duels.map((d) => (ws.has(d[0]) ? d[0] : ws.has(d[1]) ? d[1] : null));
       }
-      return { duels, winners, byes: (x.byes || []).map(norm) };
+      const flags = duels.map((_, i) => ({ ...((x.flags && x.flags[i]) || {}) }));
+      return { duels, winners, flags, byes: (x.byes || []).map(norm) };
     });
     const names = new Set();
     rounds.forEach((x) => { x.duels.flat().forEach((n) => names.add(n)); x.byes.forEach((n) => names.add(n)); });
@@ -209,7 +223,7 @@
   // ---------------- Estatísticas ----------------
 
   function emptyStats(name) {
-    return { name, titles: 0, vices: 0, undefeated: 0, participations: 0, wins: 0, losses: 0, lastDate: '' };
+    return { name, titles: 0, vices: 0, undefeated: 0, participations: 0, wins: 0, losses: 0, gatos: 0, gatosSofridos: 0, suicidios: 0, lastDate: '' };
   }
 
   function playerStats(records) {
@@ -224,7 +238,10 @@
       for (const r of t.rounds || []) {
         r.duels.forEach(([a, b], i) => {
           const w = r.winners[i]; if (!w) return;
-          get(w).wins++; get(w === a ? b : a).losses++;
+          const l = w === a ? b : a, f = flagOf(r, i);
+          get(w).wins++; get(l).losses++;
+          if (f.gato) { get(w).gatos++; get(l).gatosSofridos++; }
+          if (f.suicidio) get(l).suicidios++;
         });
       }
     }
@@ -274,7 +291,7 @@
       (t.rounds || []).forEach((r, ri) => {
         r.duels.forEach((d, i) => {
           if (d.includes(a) && d.includes(b) && r.winners[i]) {
-            duels.push({ tournament: t.name, date: t.date, round: ri + 1, winner: r.winners[i], final: t.winner && d.includes(t.winner) && d.includes(t.runnerUp) && ri === t.rounds.length - 1 });
+            duels.push({ tournament: t.name, date: t.date, round: ri + 1, winner: r.winners[i], ...flagOf(r, i), final: t.winner && d.includes(t.winner) && d.includes(t.runnerUp) && ri === t.rounds.length - 1 });
           }
         });
       });
@@ -286,7 +303,7 @@
   // Confrontos diretos entre um grupo de jogadores (só duelos entre eles)
   function groupH2H(records, names) {
     const set = new Set(names);
-    const tot = new Map(names.map((n) => [n, { name: n, wins: 0, losses: 0 }]));
+    const tot = new Map(names.map((n) => [n, { name: n, wins: 0, losses: 0, gatos: 0, suicidios: 0 }]));
     const pair = new Map(); // "a\u0000b" -> vitórias de a sobre b
     const duels = [];
     for (const t of records) {
@@ -295,8 +312,9 @@
         if (!w || !set.has(a) || !set.has(b)) return;
         const l = w === a ? b : a;
         tot.get(w).wins++; tot.get(l).losses++;
+        const f = flagOf(r, i); if (f.gato) tot.get(w).gatos++; if (f.suicidio) tot.get(l).suicidios++;
         const k = w + '\u0000' + l; pair.set(k, (pair.get(k) || 0) + 1);
-        duels.push({ tournament: t.name, date: t.date, round: ri + 1, winner: w, loser: l, ranked: t.ranked !== false });
+        duels.push({ tournament: t.name, date: t.date, round: ri + 1, winner: w, loser: l, ranked: t.ranked !== false, ...flagOf(r, i) });
       }));
     }
     const rows = [...tot.values()].map((x) => ({ ...x, games: x.wins + x.losses, winPct: x.wins + x.losses ? (x.wins / (x.wins + x.losses)) * 100 : 0 }))
@@ -343,7 +361,7 @@
   const api = {
     isRanked, seasonOf, seasons, filterRecords,
     uid, norm, key, shuffle,
-    newTournament, alive, currentRound, roundOpen, drawRound, setWinner, canCloseRound, closeRound,
+    newTournament, alive, currentRound, roundOpen, drawRound, setWinner, toggleFlag, flagOf, canCloseRound, closeRound,
     withdraw, addLatePlayer, toRecord, normalizeRecord,
     playerStats, ranking, hallOfFame, months, monthly, headToHead, groupH2H, allPlayers, renamePlayer,
   };
