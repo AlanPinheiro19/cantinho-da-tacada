@@ -24,7 +24,9 @@
 
   // ---------------- Torneio em andamento ----------------
 
-  function newTournament({ name, date, lives, players, ranked = true, scheduledId = null }) {
+  // mode: 'single' (individual) | 'duplas'. Em duplas, players = nomes das duplas
+  // ("Ana & Beto") e teams = { "Ana & Beto": ["Ana", "Beto"] }.
+  function newTournament({ name, date, lives, players, ranked = true, scheduledId = null, mode = 'single', teams = null }) {
     const seen = new Set();
     const participants = [];
     for (const p of players || []) {
@@ -40,6 +42,8 @@
       lives: Math.max(1, parseInt(lives, 10) || 3),
       ranked: ranked !== false, // vale para o ranking da temporada?
       scheduledId: scheduledId || undefined, // torneio agendado de origem
+      mode: mode === 'duplas' ? 'duplas' : 'single',
+      teams: mode === 'duplas' ? teams || {} : undefined,
       participants,
       rounds: [],
       status: 'running', // running | finished
@@ -49,50 +53,162 @@
     };
   }
 
+  const teamName = (a, b) => `${norm(a)} & ${norm(b)}`;
+  // Forma duplas a partir de uma lista (em ordem) de jogadores
+  function buildTeams(players) {
+    const ps = players.map(norm).filter(Boolean);
+    if (ps.length < 4 || ps.length % 2) throw new Error('Para duplas, informe um número PAR de jogadores (mínimo 4).');
+    const teams = {};
+    for (let i = 0; i < ps.length; i += 2) teams[teamName(ps[i], ps[i + 1])] = [ps[i], ps[i + 1]];
+    return teams;
+  }
+  const isDoubles = (r) => !!r && r.mode === 'duplas';
+
   const alive = (t) => t.participants.filter((p) => !p.eliminated);
   const findP = (t, name) => t.participants.find((p) => p.name === name);
   const currentRound = (t) => t.rounds[t.rounds.length - 1] || null;
   const roundOpen = (r) => !!r && !r.closed;
 
-  function lastOpponents(t) {
-    const r = t.rounds.filter((x) => x.closed).slice(-1)[0];
+  // ---------------- Sorteio sem repetir adversário ----------------
+  // Regra: enquanto houver adversários inéditos, ninguém repete confronto.
+  // Só quando TODOS os vivos já se enfrentaram os confrontos podem se repetir
+  // (e aí o sorteio espalha as repetições). Com número ímpar, o "bye" entra
+  // como um adversário fictício: descansa quem teve menos folgas.
+  const BYE = '\u0000BYE';
+  const pk = (a, b) => (a < b ? a + '\u0001' + b : b + '\u0001' + a);
+
+  function meetCounts(t) {
     const m = new Map();
-    if (r) for (const [a, b] of r.duels) { m.set(a, b); m.set(b, a); }
+    for (const r of t.rounds) for (const [a, b] of r.duels) m.set(pk(a, b), (m.get(pk(a, b)) || 0) + 1);
     return m;
   }
 
-  // Sorteia a próxima rodada entre os vivos.
-  // - número ímpar: "bye" para quem teve menos byes (sorteado entre empatados)
-  // - evita repetir o confronto da rodada anterior quando possível
+  // Todas as combinações de pares (emparelhamentos perfeitos) de uma lista
+  function* allMatchings(list) {
+    if (!list.length) { yield []; return; }
+    const [a, ...rest] = list;
+    for (let i = 0; i < rest.length; i++) {
+      const b = rest[i];
+      const others = rest.slice(0, i).concat(rest.slice(i + 1));
+      for (const m of allMatchings(others)) yield [[a, b], ...m];
+    }
+  }
+
+  // Existe emparelhamento só com pares inéditos (grafo "ainda não jogaram")?
+  function hasFreshMatching(list, fresh) {
+    if (!list.length) return true;
+    const [a, ...rest] = list;
+    for (let i = 0; i < rest.length; i++) {
+      if (!fresh(a, rest[i])) continue;
+      if (hasFreshMatching(rest.slice(0, i).concat(rest.slice(i + 1)), fresh)) return true;
+    }
+    return false;
+  }
+
+  // Dá para completar o "todos contra todos" dos pares inéditos restantes? (busca limitada)
+  function canFinishRoundRobin(list, played, budget) {
+    const unplayed = [];
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (!played.has(pk(list[i], list[j]))) unplayed.push(pk(list[i], list[j]));
+    if (!unplayed.length) return true;
+    const rec = (pl) => {
+      if (budget.n-- <= 0) return true; // sem certeza: não penaliza
+      const fresh = (a, b) => !pl.has(pk(a, b));
+      if ([...Array(list.length).keys()].every((i) => list.every((b, j) => j === i || pl.has(pk(list[i], b))))) return true;
+      for (const m of allMatchings(list)) {
+        if (!m.every(([a, b]) => fresh(a, b))) continue;
+        const np = new Set(pl); m.forEach(([a, b]) => np.add(pk(a, b)));
+        if (rec(np)) return true;
+        if (budget.n <= 0) return true;
+      }
+      return false;
+    };
+    return rec(new Set(played));
+  }
+
+  function matchCost(m, count, lastPair) {
+    let c = 0;
+    for (const [a, b] of m) {
+      const n = count(a, b);
+      c += n * n * 1000;              // repetir confronto pesa muito (e cada vez mais)
+      if (lastPair.has(pk(a, b))) c += 1; // desempate: evita repetir a rodada anterior
+    }
+    return c;
+  }
+
   function drawRound(t, rnd = Math.random) {
     if (t.status !== 'running') throw new Error('Torneio já finalizado.');
     if (roundOpen(currentRound(t))) throw new Error('Finalize a rodada atual antes de sortear outra.');
-    let pool = alive(t);
+    const pool = alive(t).map((p) => p.name);
     if (pool.length < 2) throw new Error('É preciso ao menos 2 jogadores vivos.');
 
-    const byes = [];
-    if (pool.length % 2 === 1) {
-      const minByes = Math.min(...pool.map((p) => p.byes));
-      const cands = pool.filter((p) => p.byes === minByes);
-      const b = cands[Math.floor(rnd() * cands.length)];
-      byes.push(b.name);
-      pool = pool.filter((p) => p !== b);
-    }
+    const meets = meetCounts(t);
+    const byesOf = new Map(t.participants.map((p) => [p.name, p.byes || 0]));
+    const list = shuffle(pool, rnd);
+    if (list.length % 2 === 1) list.push(BYE);
+    const count = (a, b) => (a === BYE ? byesOf.get(b) : b === BYE ? byesOf.get(a) : meets.get(pk(a, b)) || 0);
+    const last = t.rounds.filter((x) => x.closed).slice(-1)[0];
+    const lastPair = new Set(last ? last.duels.map(([a, b]) => pk(a, b)) : []);
+    // grafo de "já jogaram" incluindo o bye como adversário fictício (número ímpar)
+    const played = new Set([...meets.keys()]);
+    if (list.includes(BYE)) for (const [n, c] of byesOf) if (c > 0 && pool.includes(n)) played.add(pk(BYE, n));
+    const realAll = list.slice();
 
-    const prev = lastOpponents(t);
-    let best = null, bestScore = Infinity;
-    for (let tries = 0; tries < 60 && bestScore > 0; tries++) {
-      const s = shuffle(pool.map((p) => p.name), rnd);
-      const duels = [];
-      let score = 0;
-      for (let i = 0; i < s.length; i += 2) {
-        duels.push([s[i], s[i + 1]]);
-        if (prev.get(s[i]) === s[i + 1]) score++;
+    let best = null, bestCost = Infinity;
+    // Grupos grandes (>12): rodízio clássico ("método do círculo") enquanto todos estão vivos
+    let circle = null;
+    if (list.length > 12) {
+      if (!t.rrOrder || t.rrOrder.length !== list.length) t.rrOrder = shuffle(list, rnd);
+      const n = t.rrOrder.length, k = t.rounds.length;
+      if (k < n - 1 && t.rrOrder.every((x) => x === BYE || pool.includes(x)) && list.every((x) => t.rrOrder.includes(x))) {
+        const fixed = t.rrOrder[0], rot = t.rrOrder.slice(1);
+        const r = rot.slice(k % (n - 1)).concat(rot.slice(0, k % (n - 1)));
+        const m = [[fixed, r[0]]];
+        for (let i = 1; i < n / 2; i++) m.push([r[i], r[n - 1 - i]]);
+        if (m.every(([a, b]) => !count(a, b) || a === BYE || b === BYE)) circle = m;
       }
-      if (score < bestScore) { best = duels; bestScore = score; }
+    }
+    if (list.length <= 12) {
+      // busca completa (até 10.395 combinações) com olhar à frente
+      const cands = [];
+      for (const m of allMatchings(list)) {
+        const c = matchCost(m, count, lastPair);
+        if (c < bestCost + 1000) cands.push({ m, c });
+        if (c < bestCost) bestCost = c;
+      }
+      const min = cands.filter((x) => x.c < bestCost + 1000).sort((a, b) => a.c - b.c);
+      // entre as de menor custo, prefere a que mantém o "todos contra todos" possível
+      const minTier = min.filter((x) => Math.floor(x.c / 1000) === Math.floor(bestCost / 1000));
+      if (Math.floor(bestCost / 1000) === 0 && realAll.length >= 4) {
+        const budget = { n: 4000 };
+        for (const x of shuffle(minTier, rnd).sort((a, b) => a.c - b.c)) {
+          const np = new Set(played); x.m.forEach(([a, b]) => np.add(pk(a, b)));
+          if (canFinishRoundRobin(realAll, np, budget)) { best = x.m; break; }
+        }
+      }
+      if (!best) best = shuffle(minTier, rnd).sort((a, b) => a.c - b.c)[0].m;
+    } else if (circle) {
+      best = circle;
+    } else {
+      // muitos jogadores: tentativas aleatórias gulosas, fica com a melhor
+      for (let tries = 0; tries < 400 && bestCost > 0; tries++) {
+        const rest = shuffle(list, rnd), m = [];
+        while (rest.length) {
+          const a = rest.shift();
+          let bi = 0, bc = Infinity;
+          rest.forEach((b, i) => { const c = count(a, b) * 1000 + (lastPair.has(pk(a, b)) ? 1 : 0) + rnd() * 0.1; if (c < bc) { bc = c; bi = i; } });
+          m.push([a, rest.splice(bi, 1)[0]]);
+        }
+        const c = matchCost(m, count, lastPair);
+        if (c < bestCost) { bestCost = c; best = m; }
+      }
     }
 
-    const round = { duels: best, winners: best.map(() => null), flags: best.map(() => ({})), byes, closed: false };
+    const byes = [], duels = [];
+    for (const [a, b] of best) {
+      if (a === BYE) byes.push(b); else if (b === BYE) byes.push(a);
+      else duels.push(rnd() < 0.5 ? [a, b] : [b, a]);
+    }
+    const round = { duels, winners: duels.map(() => null), flags: duels.map(() => ({})), byes, closed: false };
     t.rounds.push(round);
     return round;
   }
@@ -180,6 +296,8 @@
       date: t.date,
       lives: t.lives,
       ranked: t.ranked !== false,
+      mode: t.mode || 'single',
+      teams: t.mode === 'duplas' ? t.teams : undefined,
       winner: t.winner,
       runnerUp: t.runnerUp,
       undefeated: !!t.undefeated,
@@ -211,6 +329,8 @@
       date: r.date || '',
       lives: r.lives || null,
       ranked: r.ranked !== false,
+      mode: r.mode === 'duplas' ? 'duplas' : 'single',
+      teams: r.mode === 'duplas' ? r.teams || {} : undefined,
       winner: r.winner ? norm(r.winner) : null,
       runnerUp: r.runnerUp ? norm(r.runnerUp) : null,
       undefeated: !!r.undefeated,
@@ -323,10 +443,15 @@
     return { rows, duels, vs: (a, b) => pair.get(a + '\u0000' + b) || 0 };
   }
 
+  // Jogadores individuais (integrantes das duplas entram pelo próprio nome)
   function allPlayers(records, current) {
     const s = new Set();
-    records.forEach((t) => (t.participants || []).forEach((n) => s.add(n)));
-    if (current) current.participants.forEach((p) => s.add(p.name));
+    const addT = (t, names) => {
+      if (isDoubles(t)) Object.values(t.teams || {}).forEach((m) => m.forEach((n) => s.add(n)));
+      else names.forEach((n) => s.add(n));
+    };
+    records.forEach((t) => addT(t, t.participants || []));
+    if (current) addT(current, current.participants.map((p) => p.name));
     return [...s].sort((x, y) => x.localeCompare(y, 'pt-BR'));
   }
 
@@ -352,14 +477,15 @@
   function seasons(records) {
     return [...new Set(records.map(seasonOf).filter(Boolean))].sort().reverse();
   }
-  function filterRecords(records, { type = 'all', season = 'all' } = {}) {
+  function filterRecords(records, { type = 'all', season = 'all', mode = 'all' } = {}) {
     return records.filter((r) =>
       (type === 'all' || (type === 'ranked' ? isRanked(r) : !isRanked(r))) &&
-      (season === 'all' || seasonOf(r) === season));
+      (season === 'all' || seasonOf(r) === season) &&
+      (mode === 'all' || (mode === 'duplas' ? isDoubles(r) : !isDoubles(r))));
   }
 
   const api = {
-    isRanked, seasonOf, seasons, filterRecords,
+    isRanked, seasonOf, seasons, filterRecords, buildTeams, teamName, isDoubles, meetCounts,
     uid, norm, key, shuffle,
     newTournament, alive, currentRound, roundOpen, drawRound, setWinner, toggleFlag, flagOf, canCloseRound, closeRound,
     withdraw, addLatePlayer, toRecord, normalizeRecord,

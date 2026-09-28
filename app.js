@@ -68,7 +68,8 @@
   // "Bola" do jogador: cor fixa pelo nome + iniciais
   function pball(name, size = '') {
     let x = 0; for (const c of String(name)) x = (x * 31 + c.charCodeAt(0)) >>> 0;
-    const ini = String(name).trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    const nmS = String(name).trim();
+    const ini = (nmS.includes(' & ') ? nmS.split(' & ').map((w) => w.trim()[0]) : nmS.split(/\s+/).map((w) => w[0])).slice(0, 2).join('').toUpperCase();
     return `<span class="ball pb b${(x % 15) + 1} ${size}" aria-hidden="true"><i>${h(ini)}</i></span>`;
   }
 
@@ -156,7 +157,7 @@
       <div class="tourn__head">
         <div><h3>${h(t.name)}</h3><div class="muted mono" style="font-size:12px">${fmtDate(t.date)} · ${plural(t.players, 'jogador', 'jogadores')}${t.lives ? ` · ${t.lives} vidas` : ''}</div></div>
         <div class="tourn__win">${t.winner ? pball(t.winner, 'sm') : ''}<div><b>🏆 ${h(t.winner || '—')}</b><small>vice ${h(t.runnerUp || '—')}</small></div></div>
-        <div class="btn-row">${E.isRanked(t) ? '<span class="tag gold">🏆 RANKING</span>' : '<span class="tag">🤝 AMISTOSO</span>'}${t.undefeated ? '<span class="tag gold">INVICTO</span>' : ''}
+        <div class="btn-row">${E.isRanked(t) ? '<span class="tag gold">🏆 RANKING</span>' : '<span class="tag">🤝 AMISTOSO</span>'}${E.isDoubles(t) ? '<span class="tag">👥 DUPLAS</span>' : ''}${t.undefeated ? '<span class="tag gold">INVICTO</span>' : ''}
           ${admin ? `<button class="btn btn-sm" data-rank="${h(t.id)}" title="${E.isRanked(t) ? 'Marcar como amistoso (não vale ranking)' : 'Marcar como válido para o ranking'}">${E.isRanked(t) ? 'Tirar do ranking' : 'Pôr no ranking'}</button>
           <button class="btn btn-sm btn-danger" data-del="${h(t.id)}" title="Excluir torneio">✕</button>` : ''}</div>
       </div>
@@ -167,8 +168,9 @@
   // ---------- Início ----------
   function viewHome() {
     const recs = sortedRecords();
-    const hall = E.hallOfFame(recs);
-    const players = E.playerStats(recs);
+    const singles = E.filterRecords(recs, { mode: 'single' }); // Hall da Fama da home: individual
+    const hall = E.hallOfFame(singles);
+    const players = E.playerStats(recs).filter((x) => !x.name.includes(' & '));
     const duels = players.reduce((a, s) => a + s.wins, 0);
     const cur = state.current;
 
@@ -256,7 +258,7 @@
       <div class="sched__date"><b>${String(new Date(sc.startsAt).getDate()).padStart(2, '0')}</b><span>${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][new Date(sc.startsAt).getMonth()]}</span></div>
       <div class="sched__info"><h3>${h(sc.name)}</h3>
         <div class="muted">${fmtWhen(sc.startsAt)}${sc.place ? ' · ' + h(sc.place) : ''}</div>
-        <div class="btn-row" style="gap:6px;margin-top:6px">${sc.ranked !== false ? '<span class="tag gold">🏆 RANKING</span>' : '<span class="tag">🤝 AMISTOSO</span>'}<span class="tag">${sc.lives} vidas</span>${sc.players && sc.players.length ? `<span class="tag">${plural(sc.players.length, 'confirmado', 'confirmados')}</span>` : ''}</div>
+        <div class="btn-row" style="gap:6px;margin-top:6px">${sc.ranked !== false ? '<span class="tag gold">🏆 RANKING</span>' : '<span class="tag">🤝 AMISTOSO</span>'}${sc.mode === 'duplas' ? '<span class="tag">👥 DUPLAS</span>' : ''}<span class="tag">${sc.lives} vidas</span>${sc.players && sc.players.length ? `<span class="tag">${plural(sc.players.length, 'confirmado', 'confirmados')}</span>` : ''}</div>
         ${sc.notes ? `<p class="muted" style="margin:6px 0 0;font-size:14px">${h(sc.notes)}</p>` : ''}</div>
       <div class="sched__act"><div class="sched__cd ${open ? 'on' : ''}" data-until="${h(sc.startsAt)}">${countdown(sc.startsAt)}</div>
         ${admin ? `<div class="btn-row" style="justify-content:flex-end">
@@ -283,6 +285,7 @@
           <div class="field"><label for="sfWhen">Data e hora de início</label><input class="input" id="sfWhen" type="datetime-local" required value="${localInput(e.startsAt)}"></div>
           <div class="field"><label for="sfLives">Vidas</label><input class="input" id="sfLives" type="number" min="1" max="9" value="${h(e.lives)}"></div></div>
         <div class="field"><label for="sfPlace">Local (opcional)</label><input class="input" id="sfPlace" maxlength="60" value="${h(e.place || '')}"></div>
+        <div class="field"><label for="sfMode">Modalidade</label><select class="input" id="sfMode"><option value="single" ${e.mode !== 'duplas' ? 'selected' : ''}>👤 Individual</option><option value="duplas" ${e.mode === 'duplas' ? 'selected' : ''}>👥 Duplas</option></select></div>
         <label class="switch"><input type="checkbox" id="sfRanked" ${e.ranked !== false ? 'checked' : ''}><span class="switch__ui" aria-hidden="true"></span><span><b>Vale para o Ranking da temporada</b></span></label>
         <div class="field"><label for="sfPlayers">Jogadores confirmados (opcional, separados por vírgula)</label>
           <textarea class="input" id="sfPlayers" rows="3" placeholder="Pode completar na hora de iniciar">${h((e.players || []).join(', '))}</textarea>
@@ -304,11 +307,11 @@
       if (!sc && new Date(startsAt) < new Date(Date.now() - 60000)) throw new Error('Escolha uma data e hora no futuro.');
       const players = [...new Set($('#sfPlayers', o).value.split(/[,;\n]/).map(E.norm).filter(Boolean))];
       const rec = { ...(sc || {}), id: (sc && sc.id) || E.uid(), name: E.norm($('#sfName', o).value) || 'Torneio do Ranking', startsAt,
-        lives: Math.max(1, parseInt($('#sfLives', o).value, 10) || C.defaultLives), ranked: $('#sfRanked', o).checked,
+        lives: Math.max(1, parseInt($('#sfLives', o).value, 10) || C.defaultLives), ranked: $('#sfRanked', o).checked, mode: $('#sfMode', o).value,
         place: E.norm($('#sfPlace', o).value), notes: E.norm($('#sfNotes', o).value), players, status: 'scheduled' };
       await S.saveSchedule(rec);
       state.schedules = state.schedules.filter((x) => x.id !== rec.id).concat(rec);
-      if (prefill && prefill.fromDraft) Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, scheduledId: null });
+      if (prefill && prefill.fromDraft) Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, scheduledId: null, mode: 'single', swapSel: null });
       closeOverlay(); toast(sc ? 'Agendamento atualizado' : `Torneio agendado para ${fmtWhen(startsAt)}`); render();
     }); });
   }
@@ -323,14 +326,14 @@
     $$('[data-sstart]').forEach((b) => b.addEventListener('click', () => {
       const sc = state.schedules.find((x) => x.id === b.dataset.sstart);
       if (!isOpen(sc)) return toast(`Este torneio só pode começar ${fmtWhen(sc.startsAt)}.`, true);
-      Object.assign(draft, { name: sc.name, date: ymdLocal(sc.startsAt), lives: sc.lives, ranked: sc.ranked !== false, players: (sc.players || []).slice(), scheduledId: sc.id });
+      Object.assign(draft, { name: sc.name, date: ymdLocal(sc.startsAt), lives: sc.lives, ranked: sc.ranked !== false, players: (sc.players || []).slice(), scheduledId: sc.id, mode: sc.mode === 'duplas' ? 'duplas' : 'single', swapSel: null });
       render(); const f = $('#tName'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
       toast('Confira os jogadores presentes e clique em “Sortear duelos”.');
     }));
   }
 
   // ---------- Sorteio / torneio ----------
-  const draft = { name: '', date: '', lives: C.defaultLives, players: [], ranked: true };
+  const draft = { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, mode: 'single', swapSel: null };
 
   // Torneio "atual" só é exibido se estiver em andamento, ou se terminou hoje
   // e ainda existe no histórico. Terminado antes / excluído => mesa livre.
@@ -357,6 +360,20 @@
         ${past.map((x) => `<div class="card" style="margin-bottom:8px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b>${h(x.name)}</b> <span class="muted">· ${fmtWhen(x.startsAt)}</span></span><span class="tag green">iniciado</span></div>`).join('')}</section>` : ''}`;
   }
 
+  // Formação das duplas: ordem da lista define os pares (1+2, 3+4...). Toque em dois nomes para trocá-los.
+  function duplasBlock() {
+    const ps = draft.players, n = ps.length;
+    const pairs = [];
+    for (let i = 0; i < n; i += 2) pairs.push([i, i + 1]);
+    const nm = (i) => (i < n ? `<button type="button" class="tm ${draft.swapSel === i ? 'sel' : ''}" data-swap="${i}">${pball(ps[i], 'xs')}${h(ps[i])}</button>` : '<span class="tm tm--empty">falta 1 jogador</span>');
+    return `<div class="duplas">
+      <div class="duplas__head"><b>Duplas (${Math.floor(n / 2)})</b>
+        <button type="button" class="btn btn-sm" id="shuffleTeams" ${n < 4 ? 'disabled' : ''}>🎲 Sortear duplas</button></div>
+      ${n ? `<div class="duplas__grid">${pairs.map(([a, b], k) => `<div class="dupla"><span class="dupla__n">Dupla ${k + 1}</span>${nm(a)}<span class="amp">&amp;</span>${nm(b)}</div>`).join('')}</div>` : ''}
+      <p class="legend" style="margin:8px 0 0">${n % 2 ? '⚠️ Número ímpar de jogadores: adicione ou remova 1 para fechar as duplas. ' : ''}Para trocar alguém de dupla, toque em dois nomes. As duplas seguem a ordem em que os jogadores foram adicionados.</p>
+    </div>`;
+  }
+
   function viewSetup() {
     const can = S.canWrite();
     if (!can && S.mode === 'supabase') {
@@ -366,8 +383,10 @@
         ${S.user() ? '' : '<p style="text-align:center;margin-top:18px;font-size:14px" class="muted">Quer ajudar a lançar o placar? <a href="#/config">Entre ou crie sua conta</a></p>'}`;
     }
     const known = E.allPlayers(state.records).filter((n) => !draft.players.some((p) => E.key(p) === E.key(n)));
-    const freq = E.playerStats(state.records).sort((a, b) => b.participations - a.participations).map((s) => s.name)
-      .filter((n) => known.includes(n)).slice(0, 24);
+    // frequência por jogador individual (conta também quem jogou em duplas)
+    const freqMap = new Map();
+    state.records.forEach((t) => (E.isDoubles(t) ? Object.values(t.teams || {}).flat() : t.participants || []).forEach((n) => freqMap.set(n, (freqMap.get(n) || 0) + 1)));
+    const freq = known.slice().sort((a, b) => (freqMap.get(b) || 0) - (freqMap.get(a) || 0)).slice(0, 24);
     if (!draft.date) draft.date = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
     const linked = draft.scheduledId && state.schedules.find((x) => x.id === draft.scheduledId);
@@ -382,6 +401,11 @@
           <div class="field"><label for="tDate">Data</label><input class="input" id="tDate" type="date" value="${h(draft.date)}"></div>
           <div class="field"><label for="tLives">Vidas</label><input class="input" id="tLives" type="number" min="1" max="9" value="${h(draft.lives)}"></div>
         </div>
+        <div class="field" style="margin-top:16px"><label>Modalidade</label>
+          <div class="seg" role="group" aria-label="Modalidade">
+            <button type="button" class="seg__btn ${draft.mode !== 'duplas' ? 'on' : ''}" data-mode="single" aria-pressed="${draft.mode !== 'duplas'}">👤 Individual</button>
+            <button type="button" class="seg__btn ${draft.mode === 'duplas' ? 'on' : ''}" data-mode="duplas" aria-pressed="${draft.mode === 'duplas'}">👥 Duplas</button>
+          </div></div>
         <label class="switch" style="margin-top:16px">
           <input type="checkbox" id="tRanked" ${draft.ranked ? 'checked' : ''}>
           <span class="switch__ui" aria-hidden="true"></span>
@@ -397,26 +421,36 @@
         <div style="margin-top:14px">${draft.players.length
           ? `<div class="chips">${draft.players.map((p, i) => `<span class="chip">${h(p)}<button data-rm="${i}" aria-label="Remover ${h(p)}">×</button></span>`).join('')}</div>`
           : '<div class="empty">Nenhum participante adicionado ainda.</div>'}</div>
+        ${draft.mode === 'duplas' ? duplasBlock() : ''}
         ${freq.length ? `<div style="margin-top:16px"><div class="muted" style="font-size:12px;margin-bottom:8px">Jogadores frequentes — toque para adicionar</div>
           <div class="chips">${freq.map((n) => `<button class="chip chip-add" data-add="${h(n)}">＋ ${h(n)}</button>`).join('')}</div></div>` : ''}
         <div style="margin-top:20px;display:grid;gap:10px">
           ${future ? `<div class="sched-link">📅 A data escolhida (${fmtDate(draft.date)}) é futura. Torneios futuros não começam agora: eles vão para a <b>agenda</b> e só podem ser iniciados no dia e horário marcados.</div>
           <button class="btn btn-primary btn-block" id="toSchedule" ${!can ? 'disabled' : ''}>📅 Agendar para ${fmtDate(draft.date)}</button>`
-          : `<button class="btn btn-primary btn-block" id="startBtn" ${draft.players.length < 2 || !can ? 'disabled' : ''}>🎱 Sortear duelos agora</button>`}
+          : `<button class="btn btn-primary btn-block" id="startBtn" ${(draft.mode === 'duplas' ? (draft.players.length < 4 || draft.players.length % 2) : draft.players.length < 2) || !can ? 'disabled' : ''}>🎱 Sortear duelos agora${draft.mode === 'duplas' ? ' (duplas)' : ''}</button>`}
           ${draft.players.length ? '<button class="btn btn-block btn-danger" id="clearDraft">Limpar participantes</button>' : ''}
         </div>
-        <p class="legend">Regra: cada jogador tem <b>${h(draft.lives)} vidas</b>. A cada rodada os vivos são sorteados em duelos (com número ímpar, um jogador descansa — “bye”). Quem perde todas as vidas está fora. O último que sobrar é o campeão; o último eliminado é o vice. Campeão sem nenhuma derrota = <b>invicto</b>.</p>
+        <p class="legend">${draft.mode === 'duplas' ? 'Duplas: cada dupla joga como um participante e tem as vidas do torneio. ' : ''}Sorteio: ninguém repete adversário enquanto houver alguém que ainda não enfrentou. Regra: cada ${draft.mode === 'duplas' ? 'dupla' : 'jogador'} tem <b>${h(draft.lives)} vidas</b>. A cada rodada os vivos são sorteados em duelos (com número ímpar, um jogador descansa — “bye”). Quem perde todas as vidas está fora. O último que sobrar é o campeão; o último eliminado é o vice. Campeão sem nenhuma derrota = <b>invicto</b>.</p>
       </div>`;
   }
 
   function bindSetup() {
     bindSchedules();
+    $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { draft.mode = b.dataset.mode; draft.swapSel = null; render(); }));
+    const st = $('#shuffleTeams'); if (st) st.addEventListener('click', () => { draft.players = E.shuffle(draft.players); draft.swapSel = null; render(); });
+    $$('[data-swap]').forEach((b) => b.addEventListener('click', () => {
+      const i = +b.dataset.swap;
+      if (draft.swapSel === null || draft.swapSel === undefined) draft.swapSel = i;
+      else if (draft.swapSel === i) draft.swapSel = null;
+      else { const j = draft.swapSel; [draft.players[i], draft.players[j]] = [draft.players[j], draft.players[i]]; draft.swapSel = null; }
+      render();
+    }));
     const ul = $('#unlinkS'); if (ul) ul.addEventListener('click', () => { draft.scheduledId = null; render(); });
     const sync = () => { draft.name = $('#tName').value; draft.date = $('#tDate').value; draft.lives = $('#tLives').value; draft.ranked = $('#tRanked').checked; };
     ['#tName', '#tDate', '#tLives', '#tRanked'].forEach((s) => $(s).addEventListener('input', sync));
     $('#tDate').addEventListener('change', () => { sync(); render(); });
     const ts = $('#toSchedule');
-    if (ts) ts.addEventListener('click', () => { sync(); scheduleForm(null, { name: draft.name, startsAt: new Date(draft.date + 'T20:00').toISOString(), lives: draft.lives, ranked: draft.ranked, players: draft.players.slice(), fromDraft: true }); });
+    if (ts) ts.addEventListener('click', () => { sync(); scheduleForm(null, { name: draft.name, startsAt: new Date(draft.date + 'T20:00').toISOString(), lives: draft.lives, ranked: draft.ranked, players: draft.players.slice(), mode: draft.mode, fromDraft: true }); });
     $('#tLives').addEventListener('change', () => render());
     const add = (name) => {
       const n = E.norm(name).slice(0, 40); if (!n) return;
@@ -441,13 +475,15 @@
       const sc = draft.scheduledId && state.schedules.find((x) => x.id === draft.scheduledId);
       if (sc && !isOpen(sc)) throw new Error(`Este torneio só pode começar ${fmtWhen(sc.startsAt)}.`);
       if (!sc && (draft.date || '') > todayLocal()) throw new Error('Data futura: use "Agendar" — o torneio só pode começar no dia marcado.');
-      const t = E.newTournament({ name: draft.name, date: draft.date, lives: draft.lives, players: draft.players, ranked: draft.ranked, scheduledId: sc ? sc.id : null });
+      let players = draft.players, teams = null;
+      if (draft.mode === 'duplas') { teams = E.buildTeams(draft.players); players = Object.keys(teams); }
+      const t = E.newTournament({ name: draft.name, date: draft.date, lives: draft.lives, players, ranked: draft.ranked, scheduledId: sc ? sc.id : null, mode: draft.mode, teams });
       if (t.participants.length < 2) throw new Error('Adicione ao menos 2 jogadores.');
       E.drawRound(t);
       state.current = t; state.undo = [];
       await saveCurrent();
       if (sc) { const done = { ...sc, status: 'started', tournamentId: t.id }; await S.saveSchedule(done); state.schedules = state.schedules.map((x) => (x.id === sc.id ? done : x)); }
-      Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, scheduledId: null });
+      Object.assign(draft, { name: '', date: '', lives: C.defaultLives, players: [], ranked: true, scheduledId: null, mode: 'single', swapSel: null });
       await drawAnimation(t);
       render();
     }));
@@ -490,7 +526,7 @@
         ${can ? `<button class="btn btn-primary" id="drawNext">🎱 Sortear rodada ${t.rounds.length + 1}</button>` : ''}</div>`;
     }
 
-    return `${head(finished ? 'Torneio finalizado' : 'Torneio em andamento', t.name, `${fmtDate(t.date)} · ${plural(t.participants.length, 'jogador', 'jogadores')} · ${t.lives} vidas · ${E.isRanked(t) ? 'Vale para o ranking' : 'Amistoso (não vale ranking)'}`)}
+    return `${head(finished ? 'Torneio finalizado' : 'Torneio em andamento', t.name, `${fmtDate(t.date)} · ${plural(t.participants.length, 'jogador', 'jogadores')} · ${t.lives} vidas · ${E.isRanked(t) ? 'Vale para o ranking' : 'Amistoso (não vale ranking)'}${E.isDoubles(t) ? ' · 👥 Duplas' : ''}`)}
       ${!can ? loginHint(true) : ''}${S.mode === 'supabase' && lastBy(t) ? `<p class="muted" style="text-align:center;margin:-18px 0 18px;font-size:13px">Último lançamento por <b>${h(lastBy(t))}</b></p>` : ''}
       <div class="t-layout">
         <div>${main}
@@ -587,11 +623,11 @@
   // ---------- Filtro: válidos para o ranking x demais ----------
   const curYear = String(new Date().getFullYear());
   const flt = {
-    ranking: { type: 'ranked', season: null },
-    historico: { type: 'all', season: 'all' },
-    hall: { type: 'all', season: 'all' },
-    mes: { type: 'all', season: 'all' },
-    '1x1': { type: 'all', season: 'all' },
+    ranking: { type: 'ranked', season: null, mode: 'single' },
+    historico: { type: 'all', season: 'all', mode: 'all' },
+    hall: { type: 'all', season: 'all', mode: 'single' },
+    mes: { type: 'all', season: 'all', mode: 'single' },
+    '1x1': { type: 'all', season: 'all', mode: 'single' },
   };
   try { const saved = JSON.parse(localStorage.getItem('ctd.filters') || '{}'); for (const k in saved) if (flt[k]) Object.assign(flt[k], saved[k]); } catch {}
   function recsFor(page) {
@@ -603,12 +639,16 @@
   }
   function filterBar(page, { season = true } = {}) {
     const f = flt[page];
-    const base = E.filterRecords(state.records, { type: 'all', season: f.season || 'all' });
+    const base = E.filterRecords(state.records, { type: 'all', season: f.season || 'all', mode: f.mode || 'all' });
     const n = { ranked: base.filter(E.isRanked).length, friendly: base.filter((r) => !E.isRanked(r)).length, all: base.length };
     const btn = (k, label) => `<button class="seg__btn ${f.type === k ? 'on' : ''}" data-ft="${k}" aria-pressed="${f.type === k}">${label} <span>${n[k]}</span></button>`;
     const ss = E.seasons(state.records);
     return `<div class="filterbar">
       <div class="seg" role="group" aria-label="Tipo de torneio">${btn('ranked', '🏆 Válidos p/ ranking')}${btn('friendly', '🤝 Amistosos')}${btn('all', 'Todos')}</div>
+      <label class="season"><span>Modalidade</span><select class="input" id="fmode">
+        ${page === 'historico' ? `<option value="all" ${f.mode === 'all' ? 'selected' : ''}>Todas</option>` : ''}
+        <option value="single" ${f.mode === 'single' ? 'selected' : ''}>👤 Individual</option>
+        <option value="duplas" ${f.mode === 'duplas' ? 'selected' : ''}>👥 Duplas</option></select></label>
       ${season ? `<label class="season"><span>Temporada</span><select class="input" id="fseason"><option value="all" ${f.season === 'all' ? 'selected' : ''}>Todas</option>${ss.map((y) => `<option value="${y}" ${f.season === y ? 'selected' : ''}>${y}</option>`).join('')}</select></label>` : ''}
     </div>`;
   }
@@ -616,10 +656,11 @@
     const save = () => { try { localStorage.setItem('ctd.filters', JSON.stringify(flt)); } catch {} };
     $$('[data-ft]').forEach((b) => b.addEventListener('click', () => { flt[page].type = b.dataset.ft; save(); render(); }));
     const se = $('#fseason'); if (se) se.addEventListener('change', () => { flt[page].season = se.value; save(); render(); });
+    const fm = $('#fmode'); if (fm) fm.addEventListener('change', () => { flt[page].mode = fm.value; save(); render(); });
   }
   const filterLabel = (page) => {
     const f = flt[page];
-    return `${f.type === 'ranked' ? 'Só torneios válidos para o ranking' : f.type === 'friendly' ? 'Só amistosos' : 'Todos os torneios'}${f.season && f.season !== 'all' ? ` · temporada ${f.season}` : ''}`;
+    return `${f.mode === 'duplas' ? '👥 Duplas · ' : f.mode === 'single' ? '👤 Individual · ' : ''}${f.type === 'ranked' ? 'Só torneios válidos para o ranking' : f.type === 'friendly' ? 'Só amistosos' : 'Todos os torneios'}${f.season && f.season !== 'all' ? ` · temporada ${f.season}` : ''}`;
   };
 
   // ---------- Ranking ----------
@@ -656,7 +697,7 @@
 
   // ---------- 1x1 ----------
   function viewPair(params) {
-    const players = E.allPlayers(state.records);
+    const players = E.playerStats(recsFor('1x1')).map((x) => x.name).sort((x, y) => x.localeCompare(y, 'pt-BR')); // jogadores ou duplas, conforme o filtro
     const a = params.get('a') || '', b = params.get('b') || '';
     const opt = (sel) => `<option value="">— escolher —</option>${players.map((n) => `<option ${n === sel ? 'selected' : ''}>${h(n)}</option>`).join('')}`;
     let body = '';
@@ -699,7 +740,7 @@
   }
 
   function viewGroup(params) {
-    const players = E.allPlayers(state.records);
+    const players = E.playerStats(recsFor('1x1')).map((x) => x.name).sort((x, y) => x.localeCompare(y, 'pt-BR')); // jogadores ou duplas, conforme o filtro
     const sel = (params.get('g') || '').split('|').filter((n) => players.includes(n));
     const chips = players.map((n) => `<button class="chip ${sel.includes(n) ? 'chip-on' : 'chip-add'}" data-g="${h(n)}" aria-pressed="${sel.includes(n)}">${sel.includes(n) ? '✓ ' : '＋ '}${h(n)}</button>`).join('');
     let out = '';
