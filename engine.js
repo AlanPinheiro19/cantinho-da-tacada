@@ -77,9 +77,17 @@
   const BYE = '\u0000BYE';
   const pk = (a, b) => (a < b ? a + '\u0001' + b : b + '\u0001' + a);
 
+  // Contagem de confrontos do ciclo atual. Quando um jogador é incluído no meio do
+  // torneio, começa um novo ciclo (t.cycleStart): a mesa inteira volta a se enfrentar.
+  const cycleRounds = (t) => t.rounds.slice(t.cycleStart || 0);
   function meetCounts(t) {
     const m = new Map();
-    for (const r of t.rounds) for (const [a, b] of r.duels) m.set(pk(a, b), (m.get(pk(a, b)) || 0) + 1);
+    for (const r of cycleRounds(t)) for (const [a, b] of r.duels) m.set(pk(a, b), (m.get(pk(a, b)) || 0) + 1);
+    return m;
+  }
+  function byeCounts(t) {
+    const m = new Map(t.participants.map((p) => [p.name, 0]));
+    for (const r of cycleRounds(t)) for (const b of r.byes || []) m.set(b, (m.get(b) || 0) + 1);
     return m;
   }
 
@@ -105,20 +113,26 @@
     return false;
   }
 
-  // Dá para completar o "todos contra todos" dos pares inéditos restantes? (busca limitada)
+  // Emparelhamentos usando só pares inéditos (gera direto, sem testar todos)
+  function* freshMatchings(list, fresh) {
+    if (!list.length) { yield []; return; }
+    const [a, ...rest] = list;
+    for (let i = 0; i < rest.length; i++) {
+      if (!fresh(a, rest[i])) continue;
+      for (const m of freshMatchings(rest.slice(0, i).concat(rest.slice(i + 1)), fresh)) yield [[a, rest[i]], ...m];
+    }
+  }
+
+  // Dá para completar o "todos contra todos" dos pares inéditos restantes? (busca com limite de esforço)
   function canFinishRoundRobin(list, played, budget) {
-    const unplayed = [];
-    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (!played.has(pk(list[i], list[j]))) unplayed.push(pk(list[i], list[j]));
-    if (!unplayed.length) return true;
     const rec = (pl) => {
-      if (budget.n-- <= 0) return true; // sem certeza: não penaliza
-      const fresh = (a, b) => !pl.has(pk(a, b));
-      if ([...Array(list.length).keys()].every((i) => list.every((b, j) => j === i || pl.has(pk(list[i], b))))) return true;
-      for (const m of allMatchings(list)) {
-        if (!m.every(([a, b]) => fresh(a, b))) continue;
+      let left = false;
+      for (let i = 0; i < list.length && !left; i++) for (let j = i + 1; j < list.length; j++) if (!pl.has(pk(list[i], list[j]))) { left = true; break; }
+      if (!left) return true;
+      for (const m of freshMatchings(list, (a, b) => !pl.has(pk(a, b)))) {
+        if (--budget.n <= 0) return true; // sem certeza dentro do limite: não penaliza
         const np = new Set(pl); m.forEach(([a, b]) => np.add(pk(a, b)));
         if (rec(np)) return true;
-        if (budget.n <= 0) return true;
       }
       return false;
     };
@@ -142,23 +156,28 @@
     if (pool.length < 2) throw new Error('É preciso ao menos 2 jogadores vivos.');
 
     const meets = meetCounts(t);
-    const byesOf = new Map(t.participants.map((p) => [p.name, p.byes || 0]));
+    const byesOf = byeCounts(t);
     const list = shuffle(pool, rnd);
     if (list.length % 2 === 1) list.push(BYE);
-    const count = (a, b) => (a === BYE ? byesOf.get(b) : b === BYE ? byesOf.get(a) : meets.get(pk(a, b)) || 0);
+    const rawCount = (a, b) => (a === BYE ? byesOf.get(b) || 0 : b === BYE ? byesOf.get(a) || 0 : meets.get(pk(a, b)) || 0);
+    // Ciclos: quando todos já se enfrentaram N vezes, começa a volta N+1 (mesma regra do 1º ciclo)
+    let floor = Infinity;
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) floor = Math.min(floor, rawCount(list[i], list[j]));
+    if (!isFinite(floor)) floor = 0;
+    const count = (a, b) => rawCount(a, b) - floor;
     const last = t.rounds.filter((x) => x.closed).slice(-1)[0];
     const lastPair = new Set(last ? last.duels.map(([a, b]) => pk(a, b)) : []);
     // grafo de "já jogaram" incluindo o bye como adversário fictício (número ímpar)
-    const played = new Set([...meets.keys()]);
-    if (list.includes(BYE)) for (const [n, c] of byesOf) if (c > 0 && pool.includes(n)) played.add(pk(BYE, n));
+    const played = new Set();
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (count(list[i], list[j]) > 0) played.add(pk(list[i], list[j]));
     const realAll = list.slice();
 
     let best = null, bestCost = Infinity;
     // Grupos grandes (>12): rodízio clássico ("método do círculo") enquanto todos estão vivos
     let circle = null;
     if (list.length > 12) {
-      if (!t.rrOrder || t.rrOrder.length !== list.length) t.rrOrder = shuffle(list, rnd);
-      const n = t.rrOrder.length, k = t.rounds.length;
+      if (!t.rrOrder || t.rrOrder.length !== list.length || !list.every((x) => t.rrOrder.includes(x))) { t.rrOrder = shuffle(list, rnd); t.rrStart = t.rounds.length; }
+      const n = t.rrOrder.length, k = t.rounds.length - (t.rrStart || 0);
       if (k < n - 1 && t.rrOrder.every((x) => x === BYE || pool.includes(x)) && list.every((x) => t.rrOrder.includes(x))) {
         const fixed = t.rrOrder[0], rot = t.rrOrder.slice(1);
         const r = rot.slice(k % (n - 1)).concat(rot.slice(0, k % (n - 1)));
@@ -179,7 +198,7 @@
       // entre as de menor custo, prefere a que mantém o "todos contra todos" possível
       const minTier = min.filter((x) => Math.floor(x.c / 1000) === Math.floor(bestCost / 1000));
       if (Math.floor(bestCost / 1000) === 0 && realAll.length >= 4) {
-        const budget = { n: 4000 };
+        const budget = { n: 6000 };
         for (const x of shuffle(minTier, rnd).sort((a, b) => a.c - b.c)) {
           const np = new Set(played); x.m.forEach(([a, b]) => np.add(pk(a, b)));
           if (canFinishRoundRobin(realAll, np, budget)) { best = x.m; break; }
@@ -270,6 +289,7 @@
     if (!n) return;
     if (t.participants.some((p) => key(p.name) === key(n))) throw new Error('Jogador já está no torneio.');
     t.participants.push({ name: n, losses: Math.min(losses, t.lives - 1), byes: 0, eliminated: false, eliminatedRound: null, withdrew: false });
+    t.cycleStart = t.rounds.length; // novo ciclo: todos (antigos + novo) voltam a se enfrentar
   }
 
   function checkFinish(t) {
